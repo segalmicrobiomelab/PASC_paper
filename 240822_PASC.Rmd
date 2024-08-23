@@ -1,0 +1,2469 @@
+---
+title: "240822_PASC.Paper"
+output: html_notebook
+---
+
+
+### Load Packages
+
+```{r include=FALSE}
+library("gplots")
+library("ggplot2")
+library("vegan")
+library("ade4")
+library("RColorBrewer")
+theme_set(theme_bw())
+library("reshape2")
+library("purrr")
+library(plyr)
+library("dplyr")
+library("dendextend")
+library(factoextra)
+library(tidyverse)
+library(ggpubr)
+library(scales)
+library(pheatmap)
+library(ggalluvial)
+library(rstatix)
+library(lubridate)
+library(lemon)
+library(ggh4x)
+library(corrplot)
+library(tibble)
+library(gridExtra)
+library(openxlsx)
+library(ppcor)
+library(lme4)
+library(data.table)
+library(forcats)
+library(car)
+library(magrittr)
+library(do)
+library(lmerTest)
+
+```
+
+
+
+### Generate subset files
+
+```{r}
+
+master.file <- read.csv("240812_PASC.Master.csv", header = T, check.names=F)
+
+write.csv(master.file[,c(1:3,138:172,175,176:178,180,189:192,4)] %>% filter(!if_all(4:48, is.na)), "analyses.csv", row.names=FALSE)
+write.csv(master.file[,c(1:3,5:70,4,71:114)], "dem.table.csv", row.names=FALSE)
+
+ourGrps.T3.T18.ch <- master.file[,c(115,1,116)] %>% rename("all5.IDs" = "ID.TP")
+write.csv(ourGrps.T3.T18.ch %>% filter(!if_all(c(1,3), is.na)), "Sym 3-18 Clusters.csv", row.names=FALSE)
+
+write.csv(master.file[,c(1,172,175:178)] %>% filter(!if_all(2:6, is.na)), "All.PFT.01.csv", row.names=FALSE)
+
+write.csv(master.file[,c(1:5,137,116,138:192)] %>% filter(!if_all(4:61, is.na)), "240320_multi analyses.csv", row.names=FALSE)
+
+write.csv(master.file[,c(1:5,116,172:187,189:192)] %>% filter(!if_all(4:26, is.na)), "240329_LM Master.csv", row.names=FALSE)
+
+
+#--------
+# Main file used
+analyses <- read.csv("analyses.csv", header = T, check.names=F)
+
+master1 <- analyses[!(analyses$TP == "T24" | analyses$TP == "T36"),] # removes 212 encounters
+
+master <- master1[!(master1$TP == "T0" | master1$TP == "T1"),] # removes 941 more encounters
+# master <- master1[!(master1$TP == "T0"),] # removes 597 more encounters
+
+
+#------------
+analyses.multi <- read.csv("240320_multi analyses.csv", header = T, check.names=F)
+master.multi <- analyses.multi[!(analyses.multi$TP == "T24" | 
+                                   analyses.multi$TP == "T36" |
+                                   analyses.multi$TP == "T0" | 
+                                   analyses.multi$TP == "T1"),]
+```
+
+
+
+### Figure 1A:
+#### Heat map with all patients at TPs T3-T18
+
+```{r}
+
+Sym.a <- master[,c(1:31)] # master is T3-T18, master1 is T0-T18
+rownames(Sym.a) <- Sym.a[,1]
+Sym.a <- Sym.a[,-c(1:3)]
+Sym.a <- na.omit(Sym.a)
+Sym.a <- t(Sym.a)
+
+# ensuring reproducibility for sampling
+set.seed(40)
+
+
+sl.dend_c <- t(Sym.a) %>% dist(method = "binary") %>% hclust(method = "average") %>% 
+  as.dendrogram %>% ladderize # %>% color_branches(k=15, groupLabels = TRUE) # to view the clusters
+
+sl.dend_r <- (Sym.a) %>% dist(method = "binary") %>% hclust(method = "average") %>% 
+  as.dendrogram %>% ladderize
+
+some_col_func <- function(n) rev(colorspace::heat_hcl(n, c = "red", l = c(30, 90), power = c(1/5, 1.5)))
+
+
+# Adjust rownames for graph
+new.names <- c("Headache","Brain Fog",
+               "Fatigue","Concentration/Memory",
+               "Word Finding Difficulties","Sleep Disturbances",
+               "Chest Pain","Palpatations",
+               "Heartburn","Numbness/Tingling",
+               "SOB at Rest","DOE",
+               "Cough","Change in appetite",
+               "GI symptoms","Weight loss",
+               "Lightheadedness/Dizziness","Fever",
+               "Chills","Rigors",
+               "Myalgia","Runny nose",
+               "Sore throat","Olfactory/taste disorders",
+               "Wheezing","Difficulty breathing",
+               "Extremity swelling","Joint Pain")
+
+```
+
+
+
+```{r}
+pdf(file="All T3-T18 Symptoms Heatmap.pdf", width = 40, height = 15) 
+heatmap.2(as.matrix(Sym.a-1),
+          main = "Symptoms (T3-T18)",
+          srtCol = 90,
+          Rowv = sl.dend_r,
+          Colv = sl.dend_c,
+          trace = "none", hline = NA, tracecol = NULL,
+          labRow = new.names,
+          cexRow = 2, 
+          margins = c(11,8),      
+          key.xlab = "no / yes",
+          density.info = "none",
+          col = c("white", "red", "orange"), lhei = c(2, 8),
+          colsep = c(0, 293, 461, 620, 707), # vertical line c(from, to)
+          rowsep = c(0, 28),     # horizontal line c(from, to)
+          sepcolor="black",
+          sepwidth =c(0.005,0.0005))
+dev.off()
+
+
+```
+
+
+
+```{r}
+
+# Symptom Clusters: save as csv
+
+all5.colors <- get_leaves_branches_attr(sl.dend_c, "col") # gives the branch colors in order they appear on the dend
+all5.uni.col <- all5.colors[!duplicated(all5.colors)]
+all5.clus <- 1:15
+all5.clus.num <- as.data.frame(cbind(all5.uni.col,all5.clus))		# create a lookup table matching colors with 1:17
+all5.IDs <- get_leaves_attr(sl.dend_c, "label") 			# gives the IDs in the order they appear on the dend
+all5.check.clus <- as.data.frame(cbind(all5.colors, all5.IDs))			# match the row numbers so I have the ID and corresponding color
+all5.check.clus$sym.clus <- all5.clus.num$all5.clus[match(all5.check.clus$all5.colors, all5.clus.num$all5.uni.col)] #vlookup to add clus.num:
+# wanted.data$add.new.col <- lookup.tbl$return.this[match(wanted.data$look.for, lookup.tbl$look.here)]
+
+# write.csv(all5.check.clus, file = "GroupLabels.csv", row.names = TRUE)
+
+# Read
+# sym.cl.a <- read.csv("GroupLabels.csv", row.names = 1, header = T, check.names=F)
+sym.cl <- all5.check.clus
+
+
+sym.cl.1 <- sym.cl[sym.cl$sym.clus == 1,] # Respiratory
+
+sym.cl.2 <- sym.cl[sym.cl$sym.clus == 2,] # Neurologic
+
+
+# extract all other from the original set
+sym.cl.o <- sym.cl[sym.cl$sym.clus != 1,]
+sym.cl.o <- sym.cl.o[sym.cl.o$sym.clus != 2,]
+sym.cl.o <- sym.cl.o[sym.cl.o$sym.clus != 15,]
+# Double check: nrow(sym.cl) - nrow(sym.cl.1) = nrow(sym.cl.o)
+sym.cl.o["sym.clus"] <- 3
+
+
+# Extract None and replace only the sym.clus column to match my clus
+sym.cl.no <- sym.cl[sym.cl$sym.clus == 15,]
+sym.cl.no["sym.clus"][sym.cl.no["sym.clus"] == 15] <- 4  # None
+
+
+# combine resp, none, and other and re-save
+sym.cl.new <- rbind(sym.cl.1, sym.cl.2, sym.cl.o, sym.cl.no)
+
+# write.csv(sym.cl.new, file = "Sym 3-18 Clusters.csv", row.names = TRUE)
+
+# check numbers
+
+sym2.ch <- read.csv("Sym 3-18 Clusters.csv", header = T, check.names=F)
+nrow(sym2.ch)
+
+sym2.ch1 <- sym2.ch[sym2.ch$sym.clus == 1,]
+nrow(sym2.ch1)
+sym2.ch2 <- sym2.ch[sym2.ch$sym.clus == 2,]
+nrow(sym2.ch2)
+sym2.ch3 <- sym2.ch[sym2.ch$sym.clus == 3,]
+nrow(sym2.ch3)
+sym2.ch4 <- sym2.ch[sym2.ch$sym.clus == 4,]
+nrow(sym2.ch4)
+
+```
+
+
+
+### Figure 1B:
+#### Percent across clusters: T3-T18
+
+```{r}
+
+# Add symptom clusters
+sep.id2 <- master[,c(1:31)] # master = T3-T18
+sep.id2 <- na.omit(sep.id2)
+
+clus.id2 <- read.csv("Sym 3-18 Clusters.csv", header = T, check.names=F)
+sep.id2$sym.clus <- clus.id2$sym.clus[match(sep.id2$ID.TP, clus.id2$all5.IDs)] # vlookup to add clus.num to all
+sep.id2 <- sep.id2 %>% relocate(sym.clus, .before = ID.TP)
+
+pat.cl.bw <- sep.id2
+pat.cl.bw <- pat.cl.bw[,-c(3:4)]
+
+pat.cl.bw <- pat.cl.bw %>% 
+  rename(								# (new = old)
+    ID = ID.TP,
+    clust.num = sym.clus
+  )
+
+# Melt into simplified but long format
+pat.melt.bw <- reshape2::melt(data.frame(lapply(pat.cl.bw, as.character)),
+                      id = c("ID", "clust.num"), header = T, variable.name = "Symptom", value.name="Value")
+
+clust.long.bw <- pat.melt.bw %>%
+  group_by(clust.num, Symptom, Value) %>%
+  mutate(count = n_distinct(ID)) %>%
+  distinct(clust.num, Symptom, Value, count)
+
+
+# Save as csv
+# write.csv(clust.long.bw, file = "Count 3-18.Sym.csv", row.names = F)
+
+# -----
+
+# calculate %
+clust.long.p.bw <- clust.long.bw %>%
+  group_by(clust.num, Symptom) %>%
+  mutate(perc = count / sum(count)) %>%
+  arrange(clust.num)
+
+# Save as csv
+# write.csv(clust.long.p.bw, file = "Per 3-18.Sym.csv", row.names = F)
+
+# Edit before heatmap
+clust.long.p.bw.1 <- clust.long.p.bw[clust.long.p.bw$Value == 1,] # extract all "Yes"
+
+clust.long.p.bw.0 <- clust.long.p.bw[clust.long.p.bw$Value == 0 & clust.long.p.bw$perc == 1, ]
+# extract all where "No" is 100%
+clust.long.p.bw.0$perc[clust.long.p.bw.0$Value == 0] <- 0 # Change all "No" 100% to 0%
+
+show.per.bw <- rbind(clust.long.p.bw.1, clust.long.p.bw.0)
+
+# write.csv(show.per.bw, file = "Show 3-18.Per.Sym.csv", row.names = F)
+
+# rename Symptoms
+show.per.bw$Symptom <-  
+  revalue(show.per.bw$Symptom,								# (old = new)
+    c("Headache"  = "Headache",
+    "Brain_Fog"  = "Brain Fog",
+    "Fatigue"  = "Fatigue",
+    "Concentration_Memory"  = "Concentration/Memory",
+    "Word_Finding_Difficulties"  = "Word Finding Difficulties",
+    "Sleep_Disturbances"  = "Sleep Disturbances",
+    "Chest_Pain"  = "Chest Pain",
+    "Palpatations"  = "Palpatations",
+    "Heartburn"  = "Heartburn",
+    "Numbness_tingling"  = "Numbness/Tingling",
+    "SOB_at_Rest"  = "SOB at Rest",
+    "DOE"  = "DOE",
+    "Cough"  = "Cough",
+    "Change_in_appetite"  = "Change in appetite",
+    "GI_symptoms"  = "GI symptoms",
+    "Weight_loss"  = "Weight loss",
+    "Lightheadedness_dizziness"  = "Lightheadedness/Dizziness",
+    "Fever"  = "Fever",
+    "Chills"  = "Chills",
+    "Rigors"  = "Rigors",
+    "Myalgia"  = "Myalgia",
+    "Runny_nose"  = "Runny nose",
+    "Sore_throat"  = "Sore throat",
+    "Olfactory_taste_disorders"  = "Olfactory/taste disorders",
+    "Wheezing"  = "Wheezing",
+    "Difficulty_breathing"  = "Difficulty breathing",
+    "Extremity_swelling"  = "Extremity swelling",
+    "Joint_Pain"  = "Joint Pain")
+  )
+
+# Plot
+heatmap.p1 <- ggplot(show.per.bw, 
+                       aes(x = clust.num,
+                           y = factor(Symptom, levels = unique(Symptom[order(clust.num, perc)]), ordered = T)), 
+                       colsep = c(0, 2),
+                       rowsep = c(0, 26),     # horizontal line c(from, to)
+                       sepcolor="black",
+                       sepwidth =c(0.005,0.0005)) +
+  guides(fill=guide_legend(title="Percent")) +
+  geom_tile(aes(fill = perc), alpha = 0.85)+
+  labs(title = "Distribution of Symptoms across Clusters (%)", x = "Cluster", y = NULL) + 
+  scale_fill_gradient2(low = "white", high = "red") +
+  scale_x_discrete(labels = c('Respiratory', 'Neurologic', 'Other', 'None')) +
+  theme(legend.position = "bottom")
+
+
+
+pdf("per.heat 3-18.pdf", height = 8, width = 5)
+heatmap.p1
+dev.off()
+```
+
+
+
+### Figure 1C:
+#### Alluvial Plots for All: T3-T18
+
+```{r}
+
+pc.tp2 <- sep.id2
+pc.tp2 <- pc.tp2[,-2] # remove ID.TP
+
+pc.tp2 <- pc.tp2 %>% 
+  rename(								# (new = old)
+    ID = Study_ID,
+    clust.num = sym.clus,
+    Timepoint = TP
+  )
+
+pc.tp2 <- pc.tp2 %>% relocate(Timepoint, .after = ID)
+
+pc.tp2$clust.num <- as.factor(pc.tp2$clust.num)
+
+
+# Plot
+
+pdf("TP 3-18 Across Clusters.pdf", width = 11, height = 9)
+ggplot(pc.tp2,
+       aes(x = Timepoint, stratum = clust.num, alluvium = ID,
+           fill = clust.num, label = clust.num)) +
+  scale_fill_manual(values = c("1" = "lightskyblue", 
+                               "2" = "lightslateblue",         # Fatigue:"lightslateblue",
+                               "3" = "indianred2", 
+                               "4" = "gray17"),
+                    labels=c('Respiratory', 'Neurologic', 
+                             'Indiscriminate Symptoms', 'No Symptoms')) +
+  geom_flow() +
+  geom_stratum() +
+  geom_text(aes(label = paste0("n=",after_stat(count))), size = 7,
+            stat='count', color="white", position=position_stack(vjust=0.5)) +
+  theme(legend.position = "bottom",
+        plot.title = element_text(size=18, face="bold", hjust=0.5),
+        axis.text.x = element_text(size=15, face="bold"),
+        axis.text.y = element_text(size=15, face="bold"),
+        axis.title.x = element_text(size=16, face="bold"),
+        axis.title.y = element_text(size=16, face="bold"),
+        legend.title = element_blank()) +
+  ggtitle("Symptom Clusters for All Comers") +
+  ylab("Count") +
+  scale_x_discrete(name ="Timepoint (Months)", 
+                   limits=c("T3","T6","T12","T18"),
+                   labels=c("3","6","12","18"))
+dev.off()
+
+```
+
+
+
+### Figure 2
+#### LM graph for Total SGRQ
+
+```{r}
+
+rep.analyses <- read.csv("240329_LM Master.csv", header = T, check.names=F)
+
+# Load files
+rep.master <- rep.analyses[!(rep.analyses$TP == "T0" | rep.analyses$TP == "T1" |
+                               rep.analyses$TP == "T24" | rep.analyses$TP == "T36"),]
+
+m.sgrq <- rep.master[!is.na(rep.master$sym.clus),]
+m.sgrq <- m.sgrq[,c(1:4,6:7,10:13,23:26)]
+
+# lmm needs x-axis to be continuous
+m.sgrq <- m.sgrq %>% mutate(ID.m=case_when(
+  TP == "T3" ~ 3,
+  TP == "T6" ~ 6,
+  TP == "T12" ~ 12,
+  TP == "T18" ~ 18,
+  TRUE ~ NA))
+
+# Create an identifying col
+m.sgrq <- m.sgrq %>% mutate(Hospitalized = case_when(
+  Hospitalized == 0 ~ "Non Hospitalized",
+  Hospitalized == 1 ~ "Hospitalized",
+  TRUE ~ NA
+))
+
+# lm based on sym clus at first TP for all patients
+sgrq.ic <- m.sgrq[!is.na(m.sgrq$sgrq_total_score),] # 265 pts/TPs
+sgrq.ic <- sgrq.ic[,c(1:5,11:15)]
+
+# create groups for each line based on patient sym.clus at first TP
+sgrq.ic.nd <- sgrq.ic[!duplicated(sgrq.ic$Study_ID),]
+sgrq.ic$Mygroup <- sgrq.ic.nd$sym.clus[match(sgrq.ic$Study_ID, sgrq.ic.nd$Study_ID)] 
+
+# geom_smooth colors group needs to be character not numeric
+sgrq.ic$Mycolors <- as.character(sgrq.ic$Mygroup) 
+
+head(sgrq.ic)
+
+```
+
+
+
+A chunk for each filter/subgroup:
+
+  For all pts
+  
+  Hospitalized
+  
+  Non hosp
+
+```{r}
+
+sgrq.ic2 <- sgrq.ic
+
+
+sgrq.lmm <- sgrq.ic2[,c(6:9)]
+sgrq.cols <- colnames(sgrq.lmm)
+
+sgrq.filt <- vector('list', length(sgrq.cols))
+for(i in seq_along(sgrq.cols)){
+  sgrq.filt[[i]] <- noquote(paste0(sgrq.cols[[i]]))
+}
+
+fit.total <- vector('list', length(sgrq.filt))
+for(i in seq_along(sgrq.filt)){
+  fit.total[[i]] <- lmer(sgrq.ic2[,sgrq.filt[[i]]] ~ ID.m * factor(sym.clus) + (1 | Study_ID), data = sgrq.ic2)
+}
+
+summ.fit.total <- vector('list', length(fit.total))
+for(i in seq_along(fit.total)){
+  summ.fit.total[[i]] <- summary(fit.total[[i]])
+}
+
+names(summ.fit.total) <- sgrq.filt
+
+
+pasc.clus <- c('Respiratory', 'Neurologic',
+               'Indiscriminate Symptoms', 'No Symptoms')
+
+sgrq.slopes <- list()
+# Extract the slopes for each cluster
+for(i in seq_along(summ.fit.total)){
+  sgrq.slopes[[i]] <- data.frame(
+    Component = rep(names(summ.fit.total[i]), 4),
+    Cluster = pasc.clus,
+    Slope = c(
+      coef(summ.fit.total[[i]])[2],
+      coef(summ.fit.total[[i]])[2] + coef(summ.fit.total[[i]])[6],
+      coef(summ.fit.total[[i]])[2] + coef(summ.fit.total[[i]])[7],
+      coef(summ.fit.total[[i]])[2] + coef(summ.fit.total[[i]])[8]
+    )
+  )
+  names(sgrq.slopes)[i] <- names(summ.fit.total)[i]
+}
+
+sgrq.slopes
+
+all.sgrq.slopes <- rbindlist(sgrq.slopes)
+all.sgrq.slopes$Slope <- round(all.sgrq.slopes$Slope, 3)
+all.sgrq.slopes
+
+
+all.sgrq.slopes.all <- all.sgrq.slopes
+
+
+lmm.dat.total <- list()
+for(i in seq_along(fit.total)){
+  lmm.dat.total[[i]] <- data.frame(Component = rep(sgrq.filt[[i]], nrow(sgrq.ic2)),
+                                   sgrq.ic2[,sgrq.filt[[i]]], 
+                                   sgrq.ic2$ID.m, sgrq.ic2$sym.clus, sgrq.ic2$Study_ID,
+                                   fit.val=fitted(fit.total[[i]]), sgrq.ic2$Mygroup, sgrq.ic2$Mycolors)
+  
+  colnames(lmm.dat.total[[i]]) <- c("Component",
+                                    "Comp.Values", "ID.m", "sym.clus", "Study_ID", # Comp.Values = component.values (before fitting)
+                                    "fit.val", "Mygroup", "Mycolors")
+  
+}
+
+all.lmm.dat.total <- rbindlist(lmm.dat.total)
+head(all.lmm.dat.total)
+tail(all.lmm.dat.total)
+
+
+all.lmm.dat.total$Group <- "All"
+lmm.total <- all.lmm.dat.total
+
+
+```
+
+```{r}
+
+
+  sgrq.ic2 <- sgrq.ic[sgrq.ic$Hospitalized == "Hospitalized",]
+
+
+sgrq.lmm <- sgrq.ic2[,c(6:9)]
+sgrq.cols <- colnames(sgrq.lmm)
+
+sgrq.filt <- vector('list', length(sgrq.cols))
+for(i in seq_along(sgrq.cols)){
+  sgrq.filt[[i]] <- noquote(paste0(sgrq.cols[[i]]))
+}
+
+fit.total <- vector('list', length(sgrq.filt))
+for(i in seq_along(sgrq.filt)){
+  fit.total[[i]] <- lmer(sgrq.ic2[,sgrq.filt[[i]]] ~ ID.m * factor(sym.clus) + (1 | Study_ID), data = sgrq.ic2)
+}
+
+summ.fit.total <- vector('list', length(fit.total))
+for(i in seq_along(fit.total)){
+  summ.fit.total[[i]] <- summary(fit.total[[i]])
+}
+
+names(summ.fit.total) <- sgrq.filt
+
+
+pasc.clus <- c('Respiratory', 'Neurologic',
+               'Indiscriminate Symptoms', 'No Symptoms')
+
+sgrq.slopes <- list()
+# Extract the slopes for each cluster
+for(i in seq_along(summ.fit.total)){
+  sgrq.slopes[[i]] <- data.frame(
+    Component = rep(names(summ.fit.total[i]), 4),
+    Cluster = pasc.clus,
+    Slope = c(
+      coef(summ.fit.total[[i]])[2],
+      coef(summ.fit.total[[i]])[2] + coef(summ.fit.total[[i]])[6],
+      coef(summ.fit.total[[i]])[2] + coef(summ.fit.total[[i]])[7],
+      coef(summ.fit.total[[i]])[2] + coef(summ.fit.total[[i]])[8]
+    )
+  )
+  names(sgrq.slopes)[i] <- names(summ.fit.total)[i]
+}
+
+sgrq.slopes
+
+all.sgrq.slopes <- rbindlist(sgrq.slopes)
+all.sgrq.slopes$Slope <- round(all.sgrq.slopes$Slope, 3)
+all.sgrq.slopes
+
+
+  all.sgrq.slopes.h <- all.sgrq.slopes
+
+
+lmm.dat.total <- list()
+for(i in seq_along(fit.total)){
+  lmm.dat.total[[i]] <- data.frame(Component = rep(sgrq.filt[[i]], nrow(sgrq.ic2)),
+                                   sgrq.ic2[,sgrq.filt[[i]]], 
+                                   sgrq.ic2$ID.m, sgrq.ic2$sym.clus, sgrq.ic2$Study_ID,
+                                   fit.val=fitted(fit.total[[i]]), sgrq.ic2$Mygroup, sgrq.ic2$Mycolors)
+  
+  colnames(lmm.dat.total[[i]]) <- c("Component",
+                                    "Comp.Values", "ID.m", "sym.clus", "Study_ID", # Comp.Values = component.values (before fitting)
+                                    "fit.val", "Mygroup", "Mycolors")
+  
+}
+
+all.lmm.dat.total <- rbindlist(lmm.dat.total)
+head(all.lmm.dat.total)
+tail(all.lmm.dat.total)
+
+
+
+  all.lmm.dat.total$Group <- "Hospitalized"
+  lmm.total.h <- all.lmm.dat.total
+  
+
+
+```
+
+
+```{r}
+
+  sgrq.ic2 <- sgrq.ic[sgrq.ic$Hospitalized == "Non Hospitalized",]
+
+sgrq.lmm <- sgrq.ic2[,c(6:9)]
+sgrq.cols <- colnames(sgrq.lmm)
+
+sgrq.filt <- vector('list', length(sgrq.cols))
+for(i in seq_along(sgrq.cols)){
+  sgrq.filt[[i]] <- noquote(paste0(sgrq.cols[[i]]))
+}
+
+fit.total <- vector('list', length(sgrq.filt))
+for(i in seq_along(sgrq.filt)){
+  fit.total[[i]] <- lmer(sgrq.ic2[,sgrq.filt[[i]]] ~ ID.m * factor(sym.clus) + (1 | Study_ID), data = sgrq.ic2)
+}
+
+summ.fit.total <- vector('list', length(fit.total))
+for(i in seq_along(fit.total)){
+  summ.fit.total[[i]] <- summary(fit.total[[i]])
+}
+
+names(summ.fit.total) <- sgrq.filt
+
+
+pasc.clus <- c('Respiratory', 'Neurologic',
+               'Indiscriminate Symptoms', 'No Symptoms')
+
+sgrq.slopes <- list()
+# Extract the slopes for each cluster
+for(i in seq_along(summ.fit.total)){
+  sgrq.slopes[[i]] <- data.frame(
+    Component = rep(names(summ.fit.total[i]), 4),
+    Cluster = pasc.clus,
+    Slope = c(
+      coef(summ.fit.total[[i]])[2],
+      coef(summ.fit.total[[i]])[2] + coef(summ.fit.total[[i]])[6],
+      coef(summ.fit.total[[i]])[2] + coef(summ.fit.total[[i]])[7],
+      coef(summ.fit.total[[i]])[2] + coef(summ.fit.total[[i]])[8]
+    )
+  )
+  names(sgrq.slopes)[i] <- names(summ.fit.total)[i]
+}
+
+sgrq.slopes
+
+all.sgrq.slopes <- rbindlist(sgrq.slopes)
+all.sgrq.slopes$Slope <- round(all.sgrq.slopes$Slope, 3)
+all.sgrq.slopes
+
+  all.sgrq.slopes.nh <- all.sgrq.slopes
+
+lmm.dat.total <- list()
+for(i in seq_along(fit.total)){
+  lmm.dat.total[[i]] <- data.frame(Component = rep(sgrq.filt[[i]], nrow(sgrq.ic2)),
+                                   sgrq.ic2[,sgrq.filt[[i]]], 
+                                   sgrq.ic2$ID.m, sgrq.ic2$sym.clus, sgrq.ic2$Study_ID,
+                                   fit.val=fitted(fit.total[[i]]), sgrq.ic2$Mygroup, sgrq.ic2$Mycolors)
+  
+  colnames(lmm.dat.total[[i]]) <- c("Component",
+                                    "Comp.Values", "ID.m", "sym.clus", "Study_ID", # Comp.Values = component.values (before fitting)
+                                    "fit.val", "Mygroup", "Mycolors")
+  
+}
+
+all.lmm.dat.total <- rbindlist(lmm.dat.total)
+head(all.lmm.dat.total)
+tail(all.lmm.dat.total)
+
+  
+  all.lmm.dat.total$Group <- "Non Hospitalized"
+  lmm.total.nh <- all.lmm.dat.total
+
+```
+
+
+
+```{r}
+# Create 1 df that includes the total scores for all patients, hosp, and non hosp:
+  # each patient will be listed 2x - once under the "All" label and once based on hosp status
+total.only <- rbind(lmm.total, lmm.total.h, lmm.total.nh)
+total.only <- total.only[total.only$Component == "sgrq_total_score",]
+total.only$Component <- "Total Score"
+
+
+all.sgrq.slopes.all$Group <- "All"
+all.sgrq.slopes.h$Group <- "Hospitalized"
+all.sgrq.slopes.nh$Group <- "Non Hospitalized"
+
+total.slopes <- rbind(all.sgrq.slopes.all, all.sgrq.slopes.h, all.sgrq.slopes.nh)
+total.slopes <- total.slopes[total.slopes$Component == "sgrq_total_score",]
+total.slopes$Component <- "Total Score"
+
+```
+
+
+```{r}
+## Plotting SGRQ LMM
+pdf("240805_SGRQ.LMM.Total.pdf",
+    width = 10, height = 13)
+ggplot(total.only, aes(x= ID.m, y= fit.val)) +
+  
+  geom_smooth(aes(group=Mygroup, color=Mycolors),
+              method="lm", se=TRUE,     # linear regression model w.o confidence intervals
+              alpha=0.2,level=0.8,size=1.4) +
+  geom_text(data = total.slopes[total.slopes$Cluster == "Respiratory"], 
+            aes(x = 8, y = 99, label = paste("Slope = ", Slope, sep = ""), size = 5),
+            color = "skyblue2", show.legend = F) +
+  geom_text(data = total.slopes[total.slopes$Cluster == "Neurologic"], 
+            aes(x = 8, y = 92, label = paste("Slope = ", Slope, sep = ""), size = 5),
+            color = "lightslateblue", show.legend = F) +
+  geom_text(data = total.slopes[total.slopes$Cluster == "Indiscriminate Symptoms"], 
+            aes(x = 8, y = 85, label = paste("Slope = ", Slope, sep = ""), size = 5),
+            color = "indianred2", show.legend = F) +
+  geom_text(data = total.slopes[total.slopes$Cluster == "No Symptoms"], 
+            aes(x = 8, y = 78, label = paste("Slope = ", Slope, sep = ""), size = 5),
+            color = "gray17", show.legend = F) +
+  scale_color_manual(name = "Symptom Cluster",
+                     values=c("1" = "lightskyblue",
+                              "2" = "lightslateblue",
+                              "3" = "indianred2",
+                              "4" = "gray17"),
+                     labels=c('Respiratory', 'Neurologic',
+                              'Indiscriminate Symptoms', 'No Symptoms')) +
+  facet_wrap(.~Group, ncol = 1, strip.position = 'right') +
+  theme(plot.title = element_text(size=20, face="bold", hjust=0.5),
+        axis.text.x = element_text(size=15, face="bold"),
+        axis.text.y = element_text(size=15, face="bold"),
+        axis.title.x = element_text(size=16, face="bold"),
+        axis.title.y = element_blank(),
+        strip.text.y = element_text(size=16, face="bold"),
+        # strip.text.x = element_blank(),
+        legend.title = element_text(size=14, face = "bold"),
+        legend.text = element_text(size=14)) +
+  ggtitle("LMM for SGRQ Total Score") + 
+  scale_x_continuous(name="Timepoint (Months)")
+dev.off()
+
+```
+
+
+### Figure 3
+#### Spearman correlation for SGRQ vs PFT
+
+```{r warning=FALSE}
+
+sp.c <- master.multi[,c(1,7,42:50, 59:62)]
+sp.c <- na.omit(sp.c) # leaves 91 encounters
+str(sp.c) # make sure all calc cols are numeric
+
+rownames(sp.c) <- sp.c[,1]
+sp.c <- sp.c[,-1] # Make IDs row names
+
+sp.c <- sp.c[!is.na(sp.c$sym.clus),]
+sp.c <- sp.c %>% mutate(sym.clus = case_when(
+  sym.clus == 1 ~ 'Respiratory',
+  sym.clus == 2 ~ 'Neurologic',
+  sym.clus == 3 ~ 'Indiscriminate Symptoms',
+  sym.clus == 4 ~ 'No Symptoms',
+  TRUE ~ NA
+))
+
+sp.c <- sp.c %>% rename("TLC %" = "TLC_prcnt_pred", # new_name = old_name
+                        "FRC %" = "FRV.per",
+                        "RV %" = "RV.per",
+                        "FVC %" = "FVC_prcnt_pred",
+                        "FEV1 %" = "FEV1_prcnt_pred",
+                        "FEV1/FVC" = "FEV1_FVC_ratio",
+                        "DLCO %" = "DLCO_prcnt_pred",
+                        "Adj DLCO %" = "DLCO.adj.per",
+                        "Distance Walked" = "Distance_walked_m",
+                        "Symptoms Score" = "sgrq_symptoms_score",
+                        "Activity Score" = "sgrq_activity_score",
+                        "Impact Score" = "sgrq_impact_score",
+                        "Total Score" = "sgrq_total_score")
+
+
+sp.c2 <- sp.c[,-1] # only the numeric for the graph with all patients
+
+
+col <- colorRampPalette(c("#BB4444", "#EE9988", "#FFFFFF", "#77AADD", "#4477AA"))
+
+
+# matrix for the spearman correlation
+corr_mat.all = cor(sp.c2,method="s")
+
+# matrix for the p-values
+# mat : is a matrix of data
+# ... : further arguments to pass to the native R cor.test function
+cor.mtest <- function(mat, ...) {
+  mat <- as.matrix(mat)
+  n <- ncol(mat)
+  p.mat <- matrix(NA, n, n)
+  diag(p.mat) <- 0
+  for (i in 1:(n - 1)) {
+    for (j in (i + 1):n) {
+      tmp <- cor.test(mat[, i], mat[, j], ..., method = "s")
+      p.mat[i, j] <- p.mat[j, i] <- tmp$p.value
+    }
+  }
+  # Extract p-values from upper triangle of the matrix
+  p.values <- p.mat[upper.tri(p.mat)]
+  # Adjust p-values for FDR
+  p.adjusted <- p.adjust(p.values, method = "fdr")
+  # Fill in adjusted p-values back into the matrix
+  p.mat[upper.tri(p.mat)] <- p.adjusted
+  p.mat[lower.tri(p.mat)] <- t(p.mat)[lower.tri(t(p.mat))] # Reflect across diagonal
+  colnames(p.mat) <- rownames(p.mat) <- colnames(mat)
+  p.mat
+}
+
+# matrix of the p-value of the correlation
+p_mat.all <- cor.mtest(sp.c2)
+
+
+# # write an excel with each element of a list as a diff sheet
+write.xlsx(p_mat.all, file = "240719_SpC.pvals.Final.All.only.xlsx",
+           rowNames = TRUE)
+
+write.xlsx(corr_mat.all, file = "240719_SpC.rho.Final.All.only.xlsx",
+          rowNames = TRUE)
+
+
+
+#------------
+# plot
+pdf(file = paste("240802_Spearman Corr.Final.All.only.pdf", sep=""),
+    height = 20, width = 20)
+corrplot(corr_mat.all, method="color", col=col(200), 
+         type="upper",
+         addCoef.col = "black", # Add coefficient of correlation
+         tl.col="black", tl.srt=45, #Text label color and rotation
+         
+         number.cex = 1.6, tl.cex = 1.8, cl.cex = 1.4,
+         # change size of coef nums in boxes, text label, and color bar text on rt
+         
+         # Combine with significance: only show correlation if p-val is signif
+         p.mat = p_mat.all,
+         sig.level = 0.05, insig = "blank",
+         
+         title = "PFT vs SGRQ for All", mar=c(0,0,18,0),
+         cex.main = 4, # make title bigger
+         
+         # hide correlation coefficient on the principal diagonal
+         diag=FALSE 
+)
+
+dev.off()
+
+```
+
+
+
+### Table 1
+#### Demographics
+
+```{r}
+
+dem <- read.csv("dem.table.csv", header = T, check.names=F)
+
+
+# Function for "Quantile type" #median [#lower quantile-#upper quantile]
+quantile_type <- function(df,v) {
+  resp <- unname(quantile(as.numeric(df[,v]),na.rm=TRUE,probs=c(0.25,0.5,0.75)))
+  return(paste0(resp[2]," [",resp[1],"-",resp[3],"]"))
+}
+
+# Function for "Count Type" #N (#%)
+count_type <- function(data,total) {
+  cnt <- data %>% summarise(count = n())
+  cnt <- cnt$count
+  cnt1 <- paste0(cnt," (", (round(cnt/total * 100,1)),"%)")
+  # ifelse(cnt != 0, cnt1, "0 (0%)")
+}
+
+
+
+#--------------
+ getTable1 <- function(filename) {
+    dat <- dem
+    
+    dat$sym.clus <- sep.id2$sym.clus[match(dat$Study_ID, sep.id2$Study_ID)]
+    dat <- dat %>% filter(!is.na(sym.clus))
+    
+    dat <- dat[dat$TP == "T0",]
+    
+    # Assign text to fields AND create the 'category' variables
+    dat <- dat %>% mutate(Sex=case_when(
+      # Sex == 1 ~ 'Male',
+      Sex == 0 ~ 'Female'
+    ))
+    dat <- dat %>% mutate(Race=case_when(
+      # Race == 0 ~ 'American Indian/Alaska Native',
+      # Race == 1 ~ 'Asian',
+      # Race == 2 ~ 'Native Hawaiian or other Pacific Islander',
+      Race == 3 ~ 'Black',
+      Race == 4 ~ 'White',
+      # Race == 5 ~ 'More than 1 race',
+      # Race == 6 ~ 'Unknown/not reported',
+      # Race == 7 ~ 'Other'
+    )) 
+    dat <- dat %>% mutate(Ethnicity=case_when(
+      # Ethnicity == 0 ~ 'Hispanic or Latino',
+      Ethnicity == 1 ~ 'Non-Hispanic/Latino',
+      # Ethnicity == 2 ~ 'Unknown/not reported'
+    ))
+    dat <- dat %>% mutate(Vax.to.COVID.2=case_when(
+      Vax.to.COVID.2 == 1 ~ 'Fully vaccinated at the time of acute infection',
+      # Vax.to.COVID.2 == 2 ~ 'Not vaccinated at diagnosis',
+      # Vax.to.COVID.2 == 3 ~ 'Partially vaccinated at diagnosis',
+      # TRUE ~ 'Unknown/not reported'		# all else that don't fall in the categories I specify
+    ))
+    
+    myfun <- function(x) as.Date(x, format="%m/%d/%Y")
+    dat <- dat %>% mutate(across(43:49, myfun))
+    
+    dat <- dat %>% mutate(Symptom_Onset.Categ=case_when(
+      Symptom_Onset >= ymd('0019-12-01') & Symptom_Onset <= ymd('0021-03-31') ~ 'Ancient Variants (12/1/19 - 3/31/21)',
+      # Symptom_Onset >= ymd('0021-04-01') & Symptom_Onset <= ymd('0021-06-30') ~ 'Alpha (4/1/21 - 6/30/21)',
+      # Symptom_Onset >= ymd('0021-07-01') & Symptom_Onset <= ymd('0021-12-17') ~ 'Delta (7/1/21 - 12/17/21)',
+      Symptom_Onset >= ymd('0021-12-18') & Symptom_Onset <= ymd('0023-12-31') ~ 'Omicron Variants (12/18/21 - 2/1/23)',
+      # TRUE ~ 'NA'
+    ))
+    
+    # Combine "Prior_DVT" + "Prior_PE" > "Prior Venous Thromboembolism"
+    dat <- dat %>% mutate(Prior_Venous_Thromboembolism = ifelse(dat[,54]==1 | dat[,55]==1,1,0))
+    
+    
+    
+    #-----
+    
+    total <- dat%>%summarize(count=n())
+    
+    dat$dead_or_alive <- dat$Hospitalized
+    alive_group <- dat %>% filter(Hospitalized==0)
+    dead_group <- dat %>% filter(Hospitalized==1)
+    
+    
+    count_alive <- alive_group %>%summarize(count=n())
+    count_dead <- dead_group %>%summarize(count=n())
+    
+    
+    #"Count Type" # (#%)
+    cat(paste0("Demographics,All Patients,Non Hospitalized (307),Hospitalized (133),p-value"),"\n")
+    # cat(paste0(",",total,",",count_type(alive_group, total),",",count_type(dead_group, total),"\n"))
+    
+    
+    
+    # cat(paste0("Sex,,,,","\n"))
+    for(i in unique_no.NA(dat$Sex)){
+      cat(paste0(i," (n. %),",count_type(dat%>%filter(Sex==i),total),",",
+                 count_type(alive_group%>%filter(Sex==i), count_alive),",",
+                 count_type(dead_group%>%filter(Sex==i), count_dead),",",
+                 chisq.test(table(dat$dead_or_alive, dat$Sex),correct=F)$p.value,"\n"))
+    }
+    
+    
+    #"Quantile type" # [#-#]
+    cat(paste0("Age (median. IQR),",quantile_type(dat,"Age"),",",
+               quantile_type(alive_group, "Age"),",",
+               quantile_type(dead_group, "Age"),",",
+               wilcox.test(as.numeric(Age) ~ dead_or_alive, data=dat)$p.value,"\n"))
+    
+    
+    cat(paste0("BMI (median. IQR),",quantile_type(dat,"BMI"),",",quantile_type(alive_group, "BMI"),",",
+               quantile_type(dead_group, "BMI"),",",
+               wilcox.test(as.numeric(BMI) ~ dead_or_alive, data=dat)$p.value,"\n"))
+    
+    
+    for(i in unique_no.NA(dat$Race)){
+      cat(paste0(i," (n. %),",count_type(dat%>%filter(Race==i),total),",",
+                 count_type(alive_group%>%filter(Race==i), count_alive),",",
+                 count_type(dead_group%>%filter(Race==i), count_dead),",",
+                 chisq.test(table(dat$dead_or_alive, dat$Race),correct=F)$p.value,"\n"))
+    }
+
+    
+    for(i in unique_no.NA(dat$Ethnicity)){
+      cat(paste0(i,",",count_type(dat%>%filter(Ethnicity==i),total),",",
+                 count_type(alive_group%>%filter(Ethnicity==i), count_alive),",",
+                 count_type(dead_group%>%filter(Ethnicity==i), count_dead),",",
+                 chisq.test(table(dat$dead_or_alive, dat$Ethnicity),correct=F)$p.value,"\n"))
+    }
+    
+    
+    cat(paste0("Comorbidities (n. %),,,,","\n"))
+    cat(paste0("COVID-Related Characteristics,,,,","\n"))
+    cat(paste0("Treatments received during Acute Infection,,,,","\n"))
+    
+
+    dat2 <- dat[,c(50:53,59,117,56,38,92:95,97)]
+    cols <- colnames(dat2)
+    
+    for(i in length(cols)){
+      filt <- paste(cols, "==", "1")
+    }
+    
+    filtered <- vector('list', length(filt))
+    for(i in seq_along(filt)){
+      filtered[[i]] <- cat(paste0(cols[[i]],",",count_type(dat2 %>% filter_(filt[[i]]), total),",",
+                                  count_type(alive_group%>% filter_(filt[[i]]), count_alive),",",
+                                  count_type(dead_group%>%filter_(filt[[i]]), count_dead),",",
+                                  chisq.test(table(dat$dead_or_alive,dat2[[i]]),correct=F)$p.value,"\n"))
+    }
+    
+    
+    for(i in unique_no.NA(dat$Vax.to.COVID.2)){
+      cat(paste0(i,",",count_type(dat%>%filter(Vax.to.COVID.2 ==i),total),",",
+                 count_type(alive_group%>%filter(Vax.to.COVID.2==i), count_alive),",",
+                 count_type(dead_group%>%filter(Vax.to.COVID.2==i), count_dead),",",
+                 chisq.test(table(dat$dead_or_alive, dat$Vax.to.COVID.2),correct=F)$p.value,"\n"))
+    }
+    
+    
+    cat(paste0("Dominant viral variant at time of acute infection,,,,", "\n"))
+    for(i in unique_no.NA(dat$Symptom_Onset.Categ)){
+      cat(paste0(i,",",count_type(dat%>%filter(Symptom_Onset.Categ ==i),total),",",
+                 count_type(alive_group%>%filter(Symptom_Onset.Categ==i), count_alive),",",
+                 count_type(dead_group%>%filter(Symptom_Onset.Categ==i), count_dead),",",
+                 chisq.test(table(dat$dead_or_alive, dat$Symptom_Onset.Categ),correct=F)$p.value,"\n"))
+    }
+    
+ }
+
+
+#---------
+# Print all, copy into text editor, then open as excel so commas convert to columns
+getTable1(filename)
+
+#-----------
+### Changes in Excel sheet:
+## replace "." > ","
+## replace "_" > " "
+## replace "hx" > "history"
+## remove "CTx "
+## replace "Prior_MI" > "Prior Myocardial Infarction"
+## very low p-values: "<0.001"
+## re-organize rows
+```
+
+
+### Table 2
+#### Multivariate Logistic Regression Analysis
+
+```{r}
+df <- master.file[,c(2,3,116,5,10,4,51,52,54,60,8,7)]
+df$BMI_baseline <- master.file$BMI[match(df$Study_ID, master.file$Study_ID)]
+df$Age <- master.file$Age[match(df$Study_ID, master.file$Study_ID)]
+df <- df[!is.na(df$sym.clus),]
+df <- df[order(df$sym.clus),]
+
+
+write.csv(df, "240813_Multiv.csv")
+```
+
+
+```{r}
+# df <- master.file[,c(2,3,116,5,10,4,51,52,54,60,8,7)]
+# df$BMI_baseline <- master.file$BMI[match(df$Study_ID, master.file$Study_ID)]
+# df$Age <- master.file$Age[match(df$Study_ID, master.file$Study_ID)]
+# df <- df[!is.na(df$sym.clus),]
+
+df <- read.csv("240813_Multiv.csv")
+
+
+symptom_table <- df %>% 
+  mutate(
+    Smoking_hx = as.numeric(Smoking_hx),  # Convert to numeric
+    Diabetes_Mellitus = as.numeric(Diabetes_Mellitus),  # Convert to numeric
+    HTN = as.numeric(HTN),  # Convert to numeric
+    Lung_Disease = as.numeric(Lung_Disease),  # Convert to numeric
+    Smoking_hx = ifelse(is.na(Smoking_hx) | Smoking_hx == 0 | Smoking_hx == 2, 0, 1),
+    Diabetes_Mellitus = ifelse(is.na(Diabetes_Mellitus) | Diabetes_Mellitus == 0 | Diabetes_Mellitus == 2, 0, 1),
+    HTN = ifelse(is.na(HTN) | HTN == 0 | HTN == 2, 0, 1),
+    Lung_Disease = ifelse(is.na(Lung_Disease) | Lung_Disease == 0 | Lung_Disease == 2, 0, 1),
+    `Race - White` = ifelse(Race == 4, 1, 0),  # Create "Race - White" column
+    `Ethnicity - Hispanic` = ifelse(Ethnicity == 0, 1, 0)  # Create "Ethnicity - Hispanic" column
+  ) %>%
+  filter(!is.na(BMI_baseline))  # Remove rows where BMI_baseline is NA
+
+# Renaming Time Variable
+symptom_table <- symptom_table %>%
+  rename(time = TP) %>%
+  mutate(time = case_when(
+    time == "T3" ~ "3 months",
+    time == "T6" ~ "6 months",
+    time == "T12" ~ "12 months",
+    time == "T18" ~ "18 months",
+    TRUE ~ time
+  ))
+
+# Create binary variables for each sym.clus
+symptom_table <- symptom_table %>%
+  mutate(R_sym.clus = if_else(sym.clus == "1", 1, 0),
+         Ne_sym.clus = if_else(sym.clus == "2", 1, 0),
+         In_sym.clus = if_else(sym.clus == "3", 1, 0),
+         NS_sym.clus = if_else(sym.clus == "4", 1, 0))
+
+# Identify unique patients
+unique_patients <- unique(symptom_table$Study_ID)
+
+# Subset data to include only first observation for each unique patient
+unique_data <- symptom_table %>%
+  group_by(Study_ID) %>%
+  slice(1) %>%
+  ungroup()
+
+```
+
+
+```{r}
+## Create models for each sym.clus
+
+# Fit logistic regression model on unique data with R_sym.clus as the dependent variable
+logistic_model.R <- glm(R_sym.clus ~ Age + Hospitalized + Sex + Vax.to.COVID.2 + 
+                           BMI_baseline + Smoking_hx + Diabetes_Mellitus + HTN + 
+                           Lung_Disease + `Race - White` + `Ethnicity - Hispanic`,
+                         data = unique_data,
+                         family = binomial)
+
+# Extract model coefficients using broom
+model_coefficients.R <- tidy(logistic_model.R, conf.int = TRUE, exponentiate = TRUE)
+
+
+model_coefficients.R <- as.data.frame(model_coefficients.R)
+
+# Create a data frame for the table
+table_data.R <- model_coefficients.R[,c("term", "estimate", "conf.low", 
+                                          "conf.high", "p.value")] %>%
+  mutate(estimate = round(estimate, 2), conf.low = round(conf.low, 2), 
+         conf.high = round(conf.high, 2), `p.value` = round(`p.value`, 3))
+
+table_data.R$CI.95 <- paste(table_data.R$conf.low, "-", table_data.R$conf.high)
+table_data.R <- table_data.R[,-c(3:4)]
+
+table_data.R <- table_data.R %>% rename(Term = term, OR = estimate, 
+                                          "95% CI" = CI.95,
+                                          # `95% CI Lower` = conf.low, 
+                                          # `95% CI Upper` = conf.high, 
+                                          `p-value` = p.value) %>%
+  relocate(`p-value`, .after = "95% CI") %>%
+  filter(Term != "(Intercept)")  # Exclude the intercept term
+
+
+rownames(table_data.R) <- table_data.R[,1]
+table_data.R <- table_data.R[,-1]
+
+
+#----
+# Fit logistic regression model on unique data with Ne_sym.clus as the dependent variable
+logistic_model.Ne <- glm(Ne_sym.clus ~ Age + Hospitalized + Sex + Vax.to.COVID.2 + 
+                           BMI_baseline + Smoking_hx + Diabetes_Mellitus + HTN + 
+                           Lung_Disease + `Race - White` + `Ethnicity - Hispanic`,
+                         data = unique_data,
+                         family = binomial)
+
+# Extract model coefficients using broom
+model_coefficients.Ne <- tidy(logistic_model.Ne, conf.int = TRUE, exponentiate = TRUE)
+
+
+model_coefficients.Ne <- as.data.frame(model_coefficients.Ne)
+
+# Create a data frame for the table
+table_data.Ne <- model_coefficients.Ne[,c("term", "estimate", "conf.low", 
+                                          "conf.high", "p.value")] %>%
+  mutate(estimate = round(estimate, 2), conf.low = round(conf.low, 2), 
+         conf.high = round(conf.high, 2), `p.value` = round(`p.value`, 3))
+
+table_data.Ne$CI.95 <- paste(table_data.Ne$conf.low, "-", table_data.Ne$conf.high)
+table_data.Ne <- table_data.Ne[,-c(3:4)]
+
+table_data.Ne <- table_data.Ne %>% rename(Term = term, OR = estimate, 
+                                          "95% CI" = CI.95,
+                                          # `95% CI Lower` = conf.low, 
+                                          # `95% CI Upper` = conf.high, 
+                                          `p-value` = p.value) %>%
+  relocate(`p-value`, .after = "95% CI") %>%
+  filter(Term != "(Intercept)")  # Exclude the intercept term
+
+
+rownames(table_data.Ne) <- table_data.Ne[,1]
+table_data.Ne <- table_data.Ne[,-1]
+
+
+#----
+# Fit logistic regression model on unique data with In_sym.clus as the dependent variable
+logistic_model.In <- glm(In_sym.clus ~ Age + Hospitalized + Sex + Vax.to.COVID.2 + 
+                           BMI_baseline + Smoking_hx + Diabetes_Mellitus + HTN + 
+                           Lung_Disease + `Race - White` + `Ethnicity - Hispanic`,
+                         data = unique_data,
+                         family = binomial)
+
+# Extract model coefficients using broom
+model_coefficients.In <- tidy(logistic_model.In, conf.int = TRUE, exponentiate = TRUE)
+
+
+model_coefficients.In <- as.data.frame(model_coefficients.In)
+
+# Create a data frame for the table
+table_data.In <- model_coefficients.In[,c("term", "estimate", "conf.low", 
+                                          "conf.high", "p.value")] %>%
+  mutate(estimate = round(estimate, 2), conf.low = round(conf.low, 2), 
+         conf.high = round(conf.high, 2), `p.value` = round(`p.value`, 3))
+
+table_data.In$CI.95 <- paste(table_data.In$conf.low, "-", table_data.In$conf.high)
+table_data.In <- table_data.In[,-c(3:4)]
+
+table_data.In <- table_data.In %>% rename(Term = term, OR = estimate, 
+                                          "95% CI" = CI.95,
+                                          # `95% CI Lower` = conf.low, 
+                                          # `95% CI Upper` = conf.high, 
+                                          `p-value` = p.value) %>%
+  relocate(`p-value`, .after = "95% CI") %>%
+  filter(Term != "(Intercept)")  # Exclude the intercept term
+
+
+rownames(table_data.In) <- table_data.In[,1]
+table_data.In <- table_data.In[,-1]
+
+
+#----
+# Fit logistic regression model on unique data with NS_sym.clus as the dependent variable
+logistic_model.NS <- glm(NS_sym.clus ~ Age + Hospitalized + Sex + Vax.to.COVID.2 + 
+                        BMI_baseline + Smoking_hx + Diabetes_Mellitus + HTN + 
+                        Lung_Disease + `Race - White` + `Ethnicity - Hispanic`,
+                        data = unique_data,
+                        family = binomial)
+
+# Extract model coefficients using broom
+model_coefficients.NS <- tidy(logistic_model.NS, conf.int = TRUE, exponentiate = TRUE)
+
+
+model_coefficients.NS <- as.data.frame(model_coefficients.NS)
+
+# Create a data frame for the table
+table_data.NS <- model_coefficients.NS[,c("term", "estimate", "conf.low", 
+                                          "conf.high", "p.value")] %>%
+  mutate(estimate = round(estimate, 2), conf.low = round(conf.low, 2), 
+         conf.high = round(conf.high, 2), `p.value` = round(`p.value`, 3))
+
+table_data.NS$CI.95 <- paste(table_data.NS$conf.low, "-", table_data.NS$conf.high)
+table_data.NS <- table_data.NS[,-c(3:4)]
+
+table_data.NS <- table_data.NS %>% rename(Term = term, OR = estimate, 
+         "95% CI" = CI.95,
+         # `95% CI Lower` = conf.low, 
+         # `95% CI Upper` = conf.high, 
+         `p-value` = p.value) %>%
+  relocate(`p-value`, .after = "95% CI") %>%
+  filter(Term != "(Intercept)")  # Exclude the intercept term
+
+
+rownames(table_data.NS) <- table_data.NS[,1]
+table_data.NS <- table_data.NS[,-1]
+
+```
+
+
+```{r}
+table_data <- cbind(table_data.R, table_data.Ne, table_data.In, table_data.NS)
+
+my.headers <- c("", "Respiratory Predominant", "", "", "Neurologic Predominant", "", "",
+            "Indiscriminate Symptoms", "", "", "No Symptoms", "")
+
+table_data.wH <- rbind(names(table_data), table_data)
+colnames(table_data.wH) <- my.headers
+rownames(table_data.wH)[1] <- "Factors"
+
+# Export the table to an Excel file
+write.csv(table_data.wH, "240814_OR.table.csv")
+
+```
+
+
+```{r}
+# Create a header data frame with custom titles
+header <- data.frame(
+  Title = c("Respiratory Predominant", "Neurologic Predominant", 
+            "Indiscriminate Symptoms", "No Symptoms"),
+  stringsAsFactors = FALSE
+)
+
+# Expand the header to match the number of columns in table_data
+expanded_header <- rep(header$Title, each = 4)
+
+# Create a matrix for the combined data with row names as headers
+combined_matrix <- as.matrix(table_data)
+colnames(combined_matrix) <- expanded_header
+
+# Convert the matrix back to a data frame
+combined_data_with_header <- as.data.frame(combined_matrix)
+
+
+# Export the table to an Excel file
+write.xlsx(combined_data_with_header, "240813_OR.table.xlsx", rowNames = TRUE)
+
+```
+
+
+### Table 3
+#### Comparing SGRQ Baseline and Slope
+
+```{r}
+# Prep data
+rep.analyses <- read.csv("240329_LM Master.csv", header = T, check.names=F)
+rep.master <- rep.analyses[!(rep.analyses$TP == "T0" | rep.analyses$TP == "T1" |
+                               rep.analyses$TP == "T24" | rep.analyses$TP == "T36"),]
+
+m.sgrq <- rep.master[!is.na(rep.master$sym.clus),]
+m.sgrq <- m.sgrq[,c(1:7,10:13,23:26)]
+
+# lmm needs x-axis to be continuous
+m.sgrq <- m.sgrq %>% mutate(ID.m=case_when(
+  TP == "T3" ~ 3,
+  TP == "T6" ~ 6,
+  TP == "T12" ~ 12,
+  TP == "T18" ~ 18,
+  TRUE ~ NA))
+
+# Create an identifying col
+m.sgrq <- m.sgrq %>% 
+  mutate(Hospitalized = case_when(
+    Hospitalized == 0 ~ "Non Hospitalized",
+    Hospitalized == 1 ~ "Hospitalized",
+    TRUE ~ NA
+  ))
+
+# Create an identifying col
+m.sgrq <- m.sgrq %>% 
+  mutate(Sex = case_when(
+    Sex == 0 ~ "Females",
+    Sex == 1 ~ "Males",
+    TRUE ~ NA
+  ))
+m.sgrq$Hospitalized_fac=factor(m.sgrq$Hospitalized, levels = c("Non Hospitalized", "Hospitalized"))
+m.sgrq$Sex_fac=factor(m.sgrq$Sex, levels = c("Females", "Males"))
+head(m.sgrq)
+
+# lm based on sym clus at first TP for all patients
+sgrq.ic <- m.sgrq
+
+# create groups for each line based on patient sym.clus at first TP
+sgrq.ic.nd <- sgrq.ic[!duplicated(sgrq.ic$Study_ID),]
+sgrq.ic$Mygroup <- sgrq.ic.nd$sym.clus[match(sgrq.ic$Study_ID, sgrq.ic.nd$Study_ID)]
+
+# geom_smooth colors group needs to be character not numeric
+sgrq.ic$Mycolors <- as.character(sgrq.ic$Mygroup)
+
+######################################
+sgrq.cor.total = sgrq.ic[!is.na(sgrq.ic$sgrq_total_score),c("ID.TP", "Study_ID",  "TP",
+               "Hospitalized", "Sex","sym.clus", "sgrq_total_score", "ID.m", "Hospitalized_fac",
+               "Sex_fac", "Mygroup","Mycolors")]
+sgrq.cor.symptoms = sgrq.ic[!is.na(sgrq.ic$sgrq_symptoms_score),c("ID.TP", "Study_ID",  "TP",
+                 "Hospitalized", "Sex","sym.clus", "sgrq_symptoms_score","ID.m","Hospitalized_fac",
+                 "Sex_fac","Mygroup","Mycolors")]
+sgrq.cor.activity = sgrq.ic[!is.na(sgrq.ic$sgrq_activity_score),c("ID.TP", "Study_ID",  "TP",
+                  "Hospitalized", "Sex","sym.clus", "sgrq_activity_score","ID.m",
+                  "Hospitalized_fac","Sex_fac","Mygroup","Mycolors")]
+sgrq.cor.impact = sgrq.ic[!is.na(sgrq.ic$sgrq_impact_score),c("ID.TP", "Study_ID",  "TP",
+                   "Hospitalized", "Sex","sym.clus", "sgrq_impact_score","ID.m",
+                   "Hospitalized_fac","Sex_fac","Mygroup","Mycolors")]
+
+```
+
+```{r}
+# Q1-SGRQ: Determine if there is a statistically significant difference in the slopes between the 4 clusters within each SGRQ component.
+# Linear Mixed effect model
+#--------------------------
+##################################################################################################################
+# 1. sgrq_total_score
+# Cluster 1: Respiratory, Cluster 2: Neurologic, Cluster 3: Indiscriminate, Cluster 4: No Symptoms
+#--------------------------
+# Linear Mixed Effect Model: Cluster 1 as a reference group
+summary(lmer(sgrq_total_score ~ ID.m * factor(sym.clus) + (1 | Study_ID), data = sgrq.cor.total))
+# anova(lmer(sgrq_total_score ~ ID.m * factor(sym.clus) + (1 | Study_ID), data = sgrq.cor.total))
+#--------------------------
+
+#--------------------------
+# Linear Mixed Effect Model: Cluster 2 as a reference group
+summary(lmer(sgrq_total_score ~ ID.m * factor(sym.clus, levels = c(2, 1, 3, 4)) + (1 | Study_ID), data = sgrq.cor.total))
+# anova(lmer(sgrq_total_score ~ ID.m * factor(sym.clus, levels = c(2, 1, 3, 4)) + (1 | Study_ID), data = sgrq.cor.total))
+#--------------------------
+
+#--------------------------
+# Linear Mixed Effect Model: Cluster 3 as a reference group
+summary(lmer(sgrq_total_score ~ ID.m * factor(sym.clus, levels = c(3, 1, 2, 4)) + (1 | Study_ID), data = sgrq.cor.total))
+# anova(lmer(sgrq_total_score ~ ID.m * factor(sym.clus, levels = c(3, 1, 2, 4)) + (1 | Study_ID), data = sgrq.cor.total))
+#--------------------------
+
+#--------------------------
+# Linear Mixed Effect Model: Cluster 4 as a reference group
+summary(lmer(sgrq_total_score ~ ID.m * factor(sym.clus, levels = c(4, 1, 2, 3)) + (1 | Study_ID), data = sgrq.cor.total))
+# anova(lmer(sgrq_total_score ~ ID.m * factor(sym.clus, levels = c(4, 1, 2, 3)) + (1 | Study_ID), data = sgrq.cor.total))
+#--------------------------
+##################################################################################################################
+#--------------------------
+# 2. sgrq_symptoms_score
+# Cluster 1: Respiratory, Cluster 2: Neurologic, Cluster 3: Indiscriminate, Cluster 4: No Symptoms
+#--------------------------
+# Linear Mixed Effect Model: Cluster 1 as a reference group
+summary(lmer(sgrq_symptoms_score ~ ID.m * factor(sym.clus) + (1 | Study_ID), data = sgrq.cor.symptoms))
+# anova(lmer(sgrq_symptoms_score ~ ID.m * factor(sym.clus) + (1 | Study_ID), data = sgrq.cor.symptoms))
+#--------------------------
+
+#--------------------------
+# Linear Mixed Effect Model: Cluster 2 as a reference group
+summary(lmer(sgrq_symptoms_score ~ ID.m * factor(sym.clus, levels = c(2, 1, 3, 4)) + (1 | Study_ID), data = sgrq.cor.symptoms))
+# anova(lmer(sgrq_symptoms_score ~ ID.m * factor(sym.clus, levels = c(2, 1, 3, 4)) + (1 | Study_ID), data = sgrq.cor.symptoms))
+#--------------------------
+
+#--------------------------
+# Linear Mixed Effect Model: Cluster 3 as a reference group
+summary(lmer(sgrq_symptoms_score ~ ID.m * factor(sym.clus, levels = c(3, 1, 2, 4)) + (1 | Study_ID), data = sgrq.cor.symptoms))
+# anova(lmer(sgrq_symptoms_score ~ ID.m * factor(sym.clus, levels = c(3, 1, 2, 4)) + (1 | Study_ID), data = sgrq.cor.symptoms))
+#--------------------------
+
+#--------------------------
+# Linear Mixed Effect Model: Cluster 4 as a reference group
+summary(lmer(sgrq_symptoms_score ~ ID.m * factor(sym.clus, levels = c(4, 1, 2, 3)) + (1 | Study_ID), data = sgrq.cor.symptoms))
+# anova(lmer(sgrq_symptoms_score ~ ID.m * factor(sym.clus, levels = c(4, 1, 2, 3)) + (1 | Study_ID), data = sgrq.cor.symptoms))
+#--------------------------
+##################################################################################################################
+#--------------------------
+# 3. sgrq_activity_score
+# Cluster 1: Respiratory, Cluster 2: Neurologic, Cluster 3: Indiscriminate, Cluster 4: No Symptoms
+#--------------------------
+# Linear Mixed Effect Model: Cluster 1 as a reference group
+summary(lmer(sgrq_activity_score ~ ID.m * factor(sym.clus) + (1 | Study_ID), data = sgrq.cor.activity))
+# anova(lmer(sgrq_activity_score ~ ID.m * factor(sym.clus) + (1 | Study_ID), data = sgrq.cor.activity))
+#--------------------------
+
+#--------------------------
+# Linear Mixed Effect Model: Cluster 2 as a reference group
+summary(lmer(sgrq_activity_score ~ ID.m * factor(sym.clus, levels = c(2, 1, 3, 4)) + (1 | Study_ID), data = sgrq.cor.activity))
+# anova(lmer(sgrq_activity_score ~ ID.m * factor(sym.clus, levels = c(2, 1, 3, 4)) + (1 | Study_ID), data = sgrq.cor.activity))
+#--------------------------
+
+#--------------------------
+# Linear Mixed Effect Model: Cluster 3 as a reference group
+summary(lmer(sgrq_activity_score ~ ID.m * factor(sym.clus, levels = c(3, 1, 2, 4)) + (1 | Study_ID), data = sgrq.cor.activity))
+# anova(lmer(sgrq_activity_score ~ ID.m * factor(sym.clus, levels = c(3, 1, 2, 4)) + (1 | Study_ID), data = sgrq.cor.activity))
+#--------------------------
+
+#--------------------------
+# Linear Mixed Effect Model: Cluster 4 as a reference group
+summary(lmer(sgrq_activity_score ~ ID.m * factor(sym.clus, levels = c(4, 1, 2, 3)) + (1 | Study_ID), data = sgrq.cor.activity))
+# anova(lmer(sgrq_activity_score ~ ID.m * factor(sym.clus, levels = c(4, 1, 2, 3)) + (1 | Study_ID), data = sgrq.cor.activity))
+#--------------------------
+##################################################################################################################
+#--------------------------
+# 4. sgrq_impact_score
+# Cluster 1: Respiratory, Cluster 2: Neurologic, Cluster 3: Indiscriminate, Cluster 4: No Symptoms
+#--------------------------
+# Linear Mixed Effect Model: Cluster 1 as a reference group
+summary(lmer(sgrq_impact_score ~ ID.m * factor(sym.clus) + (1 | Study_ID), data = sgrq.cor.impact))
+# anova(lmer(sgrq_impact_score ~ ID.m * factor(sym.clus) + (1 | Study_ID), data = sgrq.cor.impact))
+#--------------------------
+
+#--------------------------
+# Linear Mixed Effect Model: Cluster 2 as a reference group
+summary(lmer(sgrq_impact_score ~ ID.m * factor(sym.clus, levels = c(2, 1, 3, 4)) + (1 | Study_ID), data = sgrq.cor.impact))
+# anova(lmer(sgrq_impact_score ~ ID.m * factor(sym.clus, levels = c(2, 1, 3, 4)) + (1 | Study_ID), data = sgrq.cor.impact))
+#--------------------------
+
+#--------------------------
+# Linear Mixed Effect Model: Cluster 3 as a reference group
+summary(lmer(sgrq_impact_score ~ ID.m * factor(sym.clus, levels = c(3, 1, 2, 4)) + (1 | Study_ID), data = sgrq.cor.impact))
+# anova(lmer(sgrq_impact_score ~ ID.m * factor(sym.clus, levels = c(3, 1, 2, 4)) + (1 | Study_ID), data = sgrq.cor.impact))
+#--------------------------
+
+#--------------------------
+# Linear Mixed Effect Model: Cluster 4 as a reference group
+summary(lmer(sgrq_impact_score ~ ID.m * factor(sym.clus, levels = c(4, 1, 2, 3)) + (1 | Study_ID), data = sgrq.cor.impact))
+# anova(lmer(sgrq_impact_score ~ ID.m * factor(sym.clus, levels = c(4, 1, 2, 3)) + (1 | Study_ID), data = sgrq.cor.impact))
+
+```
+
+
+
+### Supplemental Figure 1
+#### Assessing cluster stability
+
+```{r}
+
+symptom_table <- master.file[,c(2:3,116,5,10,4)]
+symptom_table <- symptom_table %>% rename(Cluster = sym.clus)
+symptom_table <- symptom_table[!is.na(symptom_table$Cluster),]
+
+# Updating Vaccination status to a Binary Variable 
+symptom_table <- symptom_table %>% 
+  mutate(Vaccinated = case_when(
+    Vax.to.COVID.2 == 1 ~ 1,  # Fully vaccinated
+    Vax.to.COVID.2 == 2 | Vax.to.COVID.2 == 3 ~ 0  # Not vaccinated or partially vaccinated
+  )) %>%
+  filter(-Vax.to.COVID.2)
+
+count_transitions <- function(df, cluster_col) {
+  
+  # Helper function to count transitions between two clusters
+  count_transition <- function(df, from_cluster, to_cluster) {
+    transitions <- df %>%
+      group_by(Study_ID) %>%
+      filter(n() >= 2 & TP[1] == "T3" & TP[2] == "T6") %>%
+      summarise(
+        first_cluster = first(sym.clus),
+        last_cluster = last(sym.clus)
+      ) %>%
+      filter(first_cluster == from_cluster, last_cluster == to_cluster) %>%
+      nrow()
+    
+    return(transitions)
+  }
+  
+  # Count transitions for each cluster pair
+  respiratory_to_respiratory <- count_transition(df, 1, 1)
+  respiratory_to_other <- count_transition(df, 1, 2) + count_transition(df, 1, 3) + count_transition(df, 1, 4)
+  other_to_respiratory <- count_transition(df, 2, 1) + count_transition(df, 3, 1) + count_transition(df, 4, 1)
+  
+  neurologic_to_neurologic <- count_transition(df, 2, 2)
+  neurologic_to_other <- count_transition(df, 2, 1) + count_transition(df, 2, 3) + count_transition(df, 2, 4)
+  other_to_neurologic <- count_transition(df, 1, 2) + count_transition(df, 3, 2) + count_transition(df, 4, 2)
+  
+  is_to_is <- count_transition(df, 3, 3)
+  is_to_other <- count_transition(df, 3, 1) + count_transition(df, 3, 2) + count_transition(df, 3, 4)
+  other_to_is <- count_transition(df, 1, 3) + count_transition(df, 2, 3) + count_transition(df, 4, 3)
+  
+  ns_to_ns <- count_transition(df, 4, 4)
+  ns_to_other <- count_transition(df, 4, 1) + count_transition(df, 4, 2) + count_transition(df, 4, 3)
+  other_to_ns <- count_transition(df, 1, 4) + count_transition(df, 2, 4) + count_transition(df, 3, 4)
+  
+  results <- data.frame(
+    Transition = c("Respiratory to Respiratory", "Respiratory to Other", "Other to Respiratory",
+                   "Neurologic to Neurologic", "Neurologic to Other", "Other to Neurologic",
+                   "IS to IS", "IS to Other", "Other to IS",
+                   "NS to NS", "NS to Other", "Other to NS"),
+    Count = c(respiratory_to_respiratory, respiratory_to_other, other_to_respiratory,
+              neurologic_to_neurologic, neurologic_to_other, other_to_neurologic,
+              is_to_is, is_to_other, other_to_is,
+              ns_to_ns, ns_to_other, other_to_ns)
+  )
+  
+  return(results)
+}
+
+
+# Example usage
+transitions <- count_transitions(symptom_table, "sym.clus")
+print(transitions)
+
+
+total_patients <- symptom_table %>%
+  group_by(Study_ID) %>%
+  filter(n() >= 2 & TP[1] == "T12" & TP[2] == "T18") %>%
+  summarise(count = n()) %>%
+  nrow()
+
+cat("Total number of patients meeting the criteria:", total_patients, "\n")
+```
+
+
+```{r}
+
+# Updating Vaccination status to a Binary Variable 
+symptom_table <- symptom_table %>% 
+  mutate(Vaccinated = case_when(
+    Vax.to.COVID.2 == 1 ~ 1,  # Fully vaccinated
+    Vax.to.COVID.2 == 2 | Vax.to.COVID.2 == 3 ~ 0  # Not vaccinated or partially vaccinated
+  )) %>%
+  select(-Vax.to.COVID.2)
+
+
+alluvial_data <- symptom_table %>%
+  filter(TP %in% c("T3", "T6")) %>%
+  mutate(Cluster = ifelse(Cluster == 1, "Respiratory", "Other"),
+         Cluster = factor(Cluster, levels = c("Respiratory", "Other"))) %>%
+  group_by(Study_ID) %>%
+  filter(n_distinct(TP) == 2) %>%
+  ungroup() %>%
+  filter(!is.na(Cluster)) %>%  # Remove rows with NA values in the Cluster column
+  group_by(TP, Cluster) %>%
+  summarise(freq = n())
+
+# Create the alluvial plot with stacked strata, counts, and legend
+ggplot(alluvial_data,
+       aes(x = TP, stratum = Cluster, alluvium = Cluster, y = freq, fill = Cluster, label = freq)) +
+  geom_alluvium(width = 1/12) +
+  geom_stratum(width = 1/4) +
+  geom_text(stat = "stratum", size = 4) +
+  scale_fill_manual(values = c("Respiratory" = "skyblue2", "Other" = "khaki1"), 
+                    labels = c("Respiratory", "Other")) +
+  theme_minimal() +
+  theme(
+    legend.position = "bottom",
+    axis.text.x = element_text(size = 12),
+    axis.text.y = element_blank(),
+    axis.ticks.y = element_blank()
+  ) +
+  ggtitle("Evolution of Respiratory Cluster between Three and Six Months") +
+  xlab("Time Point") +
+  ylab("Number of Patients") +
+  labs(fill = "Cluster")
+
+```
+
+```{r}
+# Filter data for T3 and T6 time points, keep patients screened at both time points, and remove NA values
+alluvial_data <- symptom_table %>%
+  filter(TP %in% c("T3", "T6")) %>%
+  mutate(Cluster = ifelse(Cluster == 2, "Neurologic", "Other"),
+         Cluster = factor(Cluster, levels = c("Neurologic", "Other"))) %>%
+  group_by(Study_ID) %>%
+  filter(n_distinct(TP) == 2) %>%
+  ungroup() %>%
+  filter(!is.na(Cluster)) %>%
+  group_by(TP, Cluster) %>%
+  summarise(freq = n())
+
+# Create the alluvial plot with stacked strata, counts, and legend
+ggplot(alluvial_data,
+       aes(x = TP, stratum = Cluster, alluvium = Cluster, y = freq, fill = Cluster, label = freq)) +
+  geom_alluvium(width = 1/12) +
+  geom_stratum(width = 1/4) +
+  geom_text(stat = "stratum", size = 4) +
+  scale_fill_manual(values = c("Neurologic" = "darkorchid1", "Other" = "khaki1"), 
+                    labels = c("Neurologic", "Other")) +
+  theme_minimal() +
+  theme(
+    legend.position = "bottom",
+    axis.text.x = element_text(size = 12),
+    axis.text.y = element_blank(),
+    axis.ticks.y = element_blank()
+  ) +
+  ggtitle("Evolution of Neurologic Cluster between Three and Six Months") +
+  xlab("Time Point") +
+  ylab("Number of Patients") +
+  labs(fill = "Cluster")
+
+```
+
+```{r}
+# Filter data for T3 and T6 time points, keep patients screened at both time points, and remove NA values
+alluvial_data <- symptom_table %>%
+  filter(TP %in% c("T3", "T6")) %>%
+  mutate(Cluster = ifelse(Cluster == 3, "IS", "Other"),
+         Cluster = factor(Cluster, levels = c("IS", "Other"))) %>%
+  group_by(Study_ID) %>%
+  filter(n_distinct(TP) == 2) %>%
+  ungroup() %>%
+  filter(!is.na(Cluster)) %>%
+  group_by(TP, Cluster) %>%
+  summarise(freq = n())
+
+# Create the alluvial plot with stacked strata, counts, and legend
+ggplot(alluvial_data,
+       aes(x = TP, stratum = Cluster, alluvium = Cluster, y = freq, fill = Cluster, label = freq)) +
+  geom_alluvium(width = 1/12) +
+  geom_stratum(width = 1/4) +
+  geom_text(stat = "stratum", size = 4) +
+  scale_fill_manual(values = c("IS" = "red2", "Other" = "khaki1"), 
+                    labels = c("Indiscriminate", "Other")) +
+  theme_minimal() +
+  theme(
+    legend.position = "bottom",
+    axis.text.x = element_text(size = 12),
+    axis.text.y = element_blank(),
+    axis.ticks.y = element_blank()
+  ) +
+  ggtitle("Evolution of Indiscriminate Symptom Cluster between Three and Six Months") +
+  xlab("Time Point") +
+  ylab("Number of Patients") +
+  labs(fill = "Cluster")
+
+```
+
+```{r}
+# Filter data for T3 and T6 time points, keep patients screened at both time points, and remove NA values
+alluvial_data <- symptom_table %>%
+  filter(TP %in% c("T3", "T6")) %>%
+  mutate(Cluster = ifelse(Cluster == 4, "NS", "Other"),
+         Cluster = factor(Cluster, levels = c("NS", "Other"))) %>%
+  group_by(Study_ID) %>%
+  filter(n_distinct(TP) == 2) %>%
+  ungroup() %>%
+  filter(!is.na(Cluster)) %>%
+  group_by(TP, Cluster) %>%
+  summarise(freq = n())
+
+# Create the alluvial plot with stacked strata, counts, and legend
+ggplot(alluvial_data,
+       aes(x = TP, stratum = Cluster, alluvium = Cluster, y = freq, fill = Cluster, label = freq)) +
+  geom_alluvium(width = 1/12) +
+  geom_stratum(width = 1/4) +
+  geom_text(stat = "stratum", size = 4) +
+  scale_fill_manual(values = c("NS" = "red2", "Other" = "khaki1"), 
+                    labels = c("No Symptoms", "Other")) +
+  theme_minimal() +
+  theme(
+    legend.position = "bottom",
+    axis.text.x = element_text(size = 12),
+    axis.text.y = element_blank(),
+    axis.ticks.y = element_blank()
+  ) +
+  ggtitle("Evolution of No Symptom Cluster between Three and Six Months") +
+  xlab("Time Point") +
+  ylab("Number of Patients") +
+  labs(fill = "Cluster")
+
+```
+
+```{r}
+# Chi Square tests
+
+# Respiratory cluster data
+resp_3m <- 47
+other_3m <- 53
+resp_6m <- 37
+other_6m <- 63
+
+# Create a 2x2 contingency table for respiratory cluster
+resp_table <- matrix(c(resp_3m, resp_6m, other_3m, other_6m), nrow = 2, byrow = TRUE)
+colnames(resp_table) <- c("3 months", "6 months")
+rownames(resp_table) <- c("Respiratory", "Other")
+
+# Perform Chi-Squared's test for respiratory cluster
+chisq.test(resp_table)
+
+# Perform McNemar's test for respiratory cluster: 
+mcnemar.test(resp_table)
+
+# Neurologic cluster data
+neuro_3m <- 20
+other_3m <- 80
+neuro_6m <- 24
+other_6m <- 76
+
+# Create a 2x2 contingency table for neurologic cluster
+neuro_table <- matrix(c(neuro_3m, neuro_6m, other_3m, other_6m), nrow = 2, byrow = TRUE)
+colnames(neuro_table) <- c("3 months", "6 months")
+rownames(neuro_table) <- c("Neurologic", "Other")
+
+# Perform Chi-Squared's test for neurologic cluster
+chisq.test(neuro_table)
+
+## Perform McNemar's test for neurologic cluster 
+mcnemar.test(neuro_table)
+
+IS_3m <- 26
+other_3m <- 74
+IS_6m <- 24
+other_6m <- 76
+
+# Create a 2x2 contingency table for the IS cluster
+IS_table <- matrix(c(IS_3m, IS_6m, other_3m, other_6m), nrow = 2, byrow = TRUE)
+colnames(IS_table) <- c("3 months", "6 months")
+rownames(IS_table) <- c("IS", "Other")
+
+#### Perform Chi-Squared Test for IS cluster 
+chisq.test(IS_table)
+
+
+NS_3m <- 7 
+other_3m <- 93
+NS_6m<-15
+other_6m<- 85
+
+NS_table <- matrix(c(NS_3m, NS_6m, other_3m, other_6m), nrow = 2, byrow = TRUE)
+colnames(NS_table) <- c("3 months", "6 months")
+rownames(NS_table) <- c("NS", "Other")
+
+chisq.test(NS_table)
+
+```
+
+
+
+
+### Supplemental Figure 2
+#### Multivariate Logistic Regression Analysis
+
+```{r}
+
+df <- read.csv("240813_Multiv.csv")
+
+symptom_table <- df %>%
+  mutate(
+    `Vaccinated-Yes` = case_when(
+      Vax.to.COVID.2 == 1 ~ 1,  # Fully vaccinated
+      Vax.to.COVID.2 == 2 | Vax.to.COVID.2 == 3 ~ 0  # Not vaccinated or partially vaccinated
+    ),
+    
+    Smoking_hx = as.numeric(Smoking_hx),  # Convert to numeric
+    Diabetes_Mellitus = as.numeric(Diabetes_Mellitus),  # Convert to numeric
+    HTN = as.numeric(HTN),  # Convert to numeric
+    Lung_Disease = as.numeric(Lung_Disease),  # Convert to numeric
+    
+    Smoking_hx = ifelse(is.na(Smoking_hx) | Smoking_hx == 0 | Smoking_hx == 2, 0, 1),
+    Diabetes_Mellitus = ifelse(is.na(Diabetes_Mellitus) | Diabetes_Mellitus == 0 | 
+                                 Diabetes_Mellitus == 2, 0, 1),
+    HTN = ifelse(is.na(HTN) | HTN == 0 | HTN == 2, 0, 1),
+    Lung_Disease = ifelse(is.na(Lung_Disease) | Lung_Disease == 0 | Lung_Disease == 2, 0, 1),
+    `Elevated BMI` = ifelse(BMI_baseline >= 27, 1, 0),  # Create "Elevated BMI" column
+    `Race - White` = ifelse(Race == 4, 1, 0),  # Create "Race - White" column
+    `Ethnicity - Hispanic` = ifelse(Ethnicity == 0, 1, 0),  # Create "Ethnicity - Hispanic" column
+    `Elevated BMI` = ifelse(BMI_baseline >= 27, 1, 0)  # Create "Elevated BMI" column
+  ) %>%
+  
+  rename(`Sex - Female` = Sex) %>%  # Rename 'Sex' to 'Sex - Female'
+  filter(!is.na(BMI_baseline))  # Remove rows where BMI_baseline is NA
+
+
+# Renaming Time Variable
+symptom_table <- symptom_table %>% 
+  rename(time = TP) %>%  
+  mutate(time = case_when(
+    time == "T3" ~ "3 months",
+    time == "T6" ~ "6 months",
+    time == "T12" ~ "12 months",
+    time == "T18" ~ "18 months",
+    TRUE ~ time ))
+
+# Create binary variables for each sym.clus
+symptom_table <- symptom_table %>%
+  mutate(respiratory_sym.clus = if_else(sym.clus == "1", 1, 0),
+         neurologic_sym.clus = if_else(sym.clus == "2", 1, 0),
+         IS_sym.clus = if_else(sym.clus == "3", 1, 0),
+         NS_sym.clus = if_else(sym.clus == "4", 1, 0))
+
+# Identify unique patients
+unique_patients <- unique(symptom_table$Study_ID)
+
+# Subset data to include only first observation for each unique patient
+unique_data <- symptom_table %>%
+  group_by(Study_ID) %>%
+  slice(1) %>%
+  ungroup()
+
+```
+
+
+```{r}
+# Fit logistic regression model on unique data
+logistic_model.R <- glm(respiratory_sym.clus ~ Hospitalized + `Sex - Female` + 
+                          `Vaccinated-Yes` + `Elevated BMI` + Smoking_hx + 
+                          Diabetes_Mellitus + HTN + Lung_Disease + `Race - White` + 
+                          `Ethnicity - Hispanic`,
+                      data = unique_data,
+                      family = binomial)
+
+# Extract model coefficients
+model_coefficients.R <- summary(logistic_model.R)$coefficients
+
+# Convert coefficients to odds ratios
+odds_ratios.R <- exp(model_coefficients.R[, "Estimate"])
+
+# Calculate the confidence intervals for the odds ratios
+conf_int.R <- exp(confint(logistic_model.R))
+
+# Create a data frame for the forest plot
+forest_plot_data.R <- data.frame(
+  Term = rownames(model_coefficients.R),
+  OddsRatio = odds_ratios.R[rownames(model_coefficients.R)],
+  LowerCI = conf_int.R[rownames(model_coefficients.R), 1],
+  UpperCI = conf_int.R[rownames(model_coefficients.R), 2]
+)
+
+# Remove the intercept term from the forest plot data
+forest_plot_data.R <- forest_plot_data.R[forest_plot_data.R$Term != "(Intercept)", ]
+
+# Create the forest plot
+plot.R <- ggplot(forest_plot_data.R, aes(y = Term, x = OddsRatio, xmin = LowerCI, xmax = UpperCI)) +
+  geom_point() +
+  geom_errorbarh(height = 0.2) +
+  scale_x_log10() +
+  labs(x = "Odds Ratio", y = "Term", title = "Respiratory") +
+  theme_minimal() +
+  geom_vline(xintercept = 1, linetype = "dashed", color = "red")
+
+print(plot.R)
+```
+
+
+```{r}
+# Fit logistic regression model on unique data
+logistic_model.Ne <- glm(neurologic_sym.clus ~ Hospitalized + `Sex - Female` + 
+                          `Vaccinated-Yes` + `Elevated BMI` + Smoking_hx + 
+                          Diabetes_Mellitus + HTN + Lung_Disease + `Race - White` + 
+                          `Ethnicity - Hispanic`,
+                      data = unique_data,
+                      family = binomial)
+
+# Extract model coefficients
+model_coefficients.Ne <- summary(logistic_model.Ne)$coefficients
+
+# Convert coefficients to odds ratios
+odds_ratios.Ne <- exp(model_coefficients.Ne[, "Estimate"])
+
+# Calculate the confidence intervals for the odds ratios
+conf_int.Ne <- exp(confint(logistic_model.Ne))
+
+# Create a data frame for the forest plot
+forest_plot_data.Ne <- data.frame(
+  Term = rownames(model_coefficients.Ne),
+  OddsRatio = odds_ratios.Ne[rownames(model_coefficients.Ne)],
+  LowerCI = conf_int.Ne[rownames(model_coefficients.Ne), 1],
+  UpperCI = conf_int.Ne[rownames(model_coefficients.Ne), 2]
+)
+
+# Remove the intercept term from the forest plot data
+forest_plot_data.Ne <- forest_plot_data.Ne[forest_plot_data.Ne$Term != "(Intercept)", ]
+
+# Create the forest plot
+plot.Ne <- ggplot(forest_plot_data.Ne, aes(y = Term, x = OddsRatio, xmin = LowerCI, xmax = UpperCI)) +
+  geom_point() +
+  geom_errorbarh(height = 0.2) +
+  scale_x_log10() +
+  labs(x = "Odds Ratio", y = "Term", title = "Neurologic") +
+  theme_minimal() +
+  geom_vline(xintercept = 1, linetype = "dashed", color = "red")
+
+print(plot.Ne)
+```
+
+```{r}
+# Fit logistic regression model on unique data
+logistic_model.In <- glm(IS_sym.clus ~ Hospitalized + `Sex - Female` + 
+                          `Vaccinated-Yes` + `Elevated BMI` + Smoking_hx + 
+                          Diabetes_Mellitus + HTN + Lung_Disease + `Race - White` + 
+                          `Ethnicity - Hispanic`,
+                      data = unique_data,
+                      family = binomial)
+
+# Extract model coefficients
+model_coefficients.In <- summary(logistic_model.In)$coefficients
+
+# Convert coefficients to odds ratios
+odds_ratios.In <- exp(model_coefficients.In[, "Estimate"])
+
+# Calculate the confidence intervals for the odds ratios
+conf_int.In <- exp(confint(logistic_model.In))
+
+# Create a data frame for the forest plot
+forest_plot_data.In <- data.frame(
+  Term = rownames(model_coefficients.In),
+  OddsRatio = odds_ratios.In[rownames(model_coefficients.In)],
+  LowerCI = conf_int.In[rownames(model_coefficients.In), 1],
+  UpperCI = conf_int.In[rownames(model_coefficients.In), 2]
+)
+
+# Remove the intercept term from the forest plot data
+forest_plot_data.In <- forest_plot_data.In[forest_plot_data.In$Term != "(Intercept)", ]
+
+# Create the forest plot
+plot.In <- ggplot(forest_plot_data.In, aes(y = Term, x = OddsRatio, xmin = LowerCI, xmax = UpperCI)) +
+  geom_point() +
+  geom_errorbarh(height = 0.2) +
+  scale_x_log10() +
+  labs(x = "Odds Ratio", y = "Term", title = "Indiscriminate Symptoms") +
+  theme_minimal() +
+  geom_vline(xintercept = 1, linetype = "dashed", color = "red")
+
+print(plot.In)
+```
+
+```{r}
+# Fit logistic regression model on unique data
+logistic_model.NS <- glm(NS_sym.clus ~ Hospitalized + `Sex - Female` + 
+                          `Vaccinated-Yes` + `Elevated BMI` + Smoking_hx + 
+                          Diabetes_Mellitus + HTN + Lung_Disease + `Race - White` + 
+                          `Ethnicity - Hispanic`,
+                      data = unique_data,
+                      family = binomial)
+
+# Extract model coefficients
+model_coefficients.NS <- summary(logistic_model.NS)$coefficients
+
+# Convert coefficients to odds ratios
+odds_ratios.NS <- exp(model_coefficients.NS[, "Estimate"])
+
+# Calculate the confidence intervals for the odds ratios
+conf_int.NS <- exp(confint(logistic_model.NS))
+
+# Create a data frame for the forest plot
+forest_plot_data.NS <- data.frame(
+  Term = rownames(model_coefficients.NS),
+  OddsRatio = odds_ratios.NS[rownames(model_coefficients.NS)],
+  LowerCI = conf_int.NS[rownames(model_coefficients.NS), 1],
+  UpperCI = conf_int.NS[rownames(model_coefficients.NS), 2]
+)
+
+# Remove the intercept term from the forest plot data
+forest_plot_data.NS <- forest_plot_data.NS[forest_plot_data.NS$Term != "(Intercept)", ]
+
+# Create the forest plot
+plot.NS <- ggplot(forest_plot_data.NS, aes(y = Term, x = OddsRatio, xmin = LowerCI, xmax = UpperCI)) +
+  geom_point() +
+  geom_errorbarh(height = 0.2) +
+  scale_x_log10() +
+  labs(x = "Odds Ratio", y = "Term", title = "No Symptoms") +
+  theme_minimal() +
+  geom_vline(xintercept = 1, linetype = "dashed", color = "red")
+
+print(plot.NS)
+```
+
+```{r}
+
+pdf("240814_OR.Graphs.pdf", width=8, height=8, onefile = TRUE)
+print(plot.R)   # Plot for top-left quadrant
+print(plot.Ne)  # Plot for top-right quadrant
+print(plot.In)  # Plot for bottom-left quadrant
+print(plot.NS)  # Plot for bottom-right quadrant
+dev.off()
+
+```
+
+
+
+
+### Supplemental Figure 3
+#### LMM for SGRQ
+
+```{r}
+
+## Make it a 3x3
+# Create 1 df that includes the scores for all patients, hosp, and non hosp:
+# each patient will be listed 2x - once under the "All" label and once based on hosp status
+all.lmm <- rbind(lmm.total, lmm.total.h, lmm.total.nh)
+all.lmm <- all.lmm[all.lmm$Component != "sgrq_total_score",]
+
+
+all.sgrq.slopes.all$Group <- "All"
+all.sgrq.slopes.h$Group <- "Hospitalized"
+all.sgrq.slopes.nh$Group <- "Non Hospitalized"
+
+all.slopes <- rbind(all.sgrq.slopes.all, all.sgrq.slopes.h, all.sgrq.slopes.nh)
+all.slopes <- all.slopes[all.slopes$Component != "sgrq_total_score",]
+
+
+
+#---------
+## Plotting SGRQ LMM
+pdf("240805_sgrq.lmm.supp.pdf",
+    width = 25, height = 15)
+ggplot(all.lmm, aes(x= ID.m, y= fit.val)) +
+  geom_smooth(aes(group=Mygroup, color=Mycolors),
+              method="lm", se=TRUE,     # linear regression model w.o confidence intervals
+              alpha=0.2,level=0.8,size=1.4) +
+  geom_text(data = all.slopes[all.slopes$Cluster == "Respiratory"], 
+            aes(x = 8, y = 99, label = paste("Slope = ", Slope, sep = ""), size = 6),
+            color = "skyblue2", show.legend = F) +
+  geom_text(data = all.slopes[all.slopes$Cluster == "Neurologic"], 
+            aes(x = 8, y = 92, label = paste("Slope = ", Slope, sep = ""), size = 6),
+            color = "lightslateblue", show.legend = F) +
+  geom_text(data = all.slopes[all.slopes$Cluster == "Indiscriminate Symptoms"], 
+            aes(x = 8, y = 85, label = paste("Slope = ", Slope, sep = ""), size = 6),
+            color = "indianred2", show.legend = F) +
+  geom_text(data = all.slopes[all.slopes$Cluster == "No Symptoms"], 
+            aes(x = 8, y = 78, label = paste("Slope = ", Slope, sep = ""), size = 6),
+            color = "gray17", show.legend = F) +
+  scale_color_manual(name = "Symptom Cluster",
+                     values=c("1" = "lightskyblue",
+                              "2" = "lightslateblue",
+                              "3" = "indianred2",
+                              "4" = "gray17"),
+                     labels=c('Respiratory', 'Neurologic',
+                              'Indiscriminate Symptoms)', 'No Symptoms')) +
+
+  facet_grid2(rows = vars(Group), 
+              cols = vars(Component),
+              axes="x", # show the x-axis line, separates the graph/better visualization
+              scales="free",
+              labeller = labeller(Component = 
+                                    c("sgrq_symptoms_score" = "Symptoms Score",
+                                      "sgrq_activity_score"  = "Activity Score",
+                                      "sgrq_impact_score"  = "Impact Score")))+
+  theme(plot.title = element_text(size=20, face="bold", hjust=0.5),
+        axis.text.x = element_text(size=15, face="bold"),
+        axis.text.y = element_text(size=15, face="bold"),
+        axis.title.x = element_text(size=16, face="bold"),
+        axis.title.y = element_text(size=16, face="bold"),
+        strip.text.x = element_text(size=16, face="bold"),
+        strip.text.y = element_text(size=16, face="bold"),
+        legend.title = element_text(size=14, face = "bold"),
+        legend.text = element_text(size=14)) +
+  ggtitle("SGRQ LMM") +
+  scale_x_continuous(name="Timepoint (Months)")
+dev.off()
+
+```
+
+
+
+### Supplemental Figure 4
+#### Spearman correlation for SGRQ vs PFT for each symptom cluster
+
+```{r}
+
+sp.c <- master.multi[,c(1,7,42:50, 59:62)]
+sp.c <- na.omit(sp.c) # leaves 91 encounters
+str(sp.c) # make sure all calc cols are numeric
+
+rownames(sp.c) <- sp.c[,1]
+sp.c <- sp.c[,-1] # Make IDs row names
+
+sp.c <- sp.c[!is.na(sp.c$sym.clus),]
+sp.c <- sp.c %>% mutate(sym.clus = case_when(
+  sym.clus == 1 ~ 'Respiratory',
+  sym.clus == 2 ~ 'Neurologic',
+  sym.clus == 3 ~ 'Indiscriminate Symptoms',
+  sym.clus == 4 ~ 'No Symptoms',
+  TRUE ~ NA
+))
+
+sp.c <- sp.c %>% rename("TLC %" = "TLC_prcnt_pred", # new_name = old_name
+                        "FRC %" = "FRV.per",
+                        "RV %" = "RV.per",
+                        "FVC %" = "FVC_prcnt_pred",
+                        "FEV1 %" = "FEV1_prcnt_pred",
+                        "FEV1/FVC" = "FEV1_FVC_ratio",
+                        "DLCO %" = "DLCO_prcnt_pred",
+                        "Adj DLCO %" = "DLCO.adj.per",
+                        "Distance Walked" = "Distance_walked_m",
+                        "Symptoms Score" = "sgrq_symptoms_score",
+                        "Activity Score" = "sgrq_activity_score",
+                        "Impact Score" = "sgrq_impact_score",
+                        "Total Score" = "sgrq_total_score")
+
+# remove sym clus col and split by it
+sp.c.sc <- sp.c
+sp.c.sc <-split(sp.c.sc[,-1], sp.c.sc$sym.clus) 
+
+
+sp.c.list <- sp.c.sc
+
+
+col <- colorRampPalette(c("#BB4444", "#EE9988", "#FFFFFF", "#77AADD", "#4477AA"))
+
+
+# matrix for the spearman correlation
+corr_mat <- lapply(sp.c.list, function(x) cor(x, method="s"))
+
+
+# matrix for the p-values
+# mat : is a matrix of data
+# ... : further arguments to pass to the native R cor.test function
+cor.mtest <- function(mat, ...) {
+  mat <- as.matrix(mat)
+  n <- ncol(mat)
+  p.mat <- matrix(NA, n, n)
+  diag(p.mat) <- 0
+  for (i in 1:(n - 1)) {
+    for (j in (i + 1):n) {
+      tmp <- cor.test(mat[, i], mat[, j], ..., method = "s")
+      p.mat[i, j] <- p.mat[j, i] <- tmp$p.value
+    }
+  }
+  # Extract p-values from upper triangle of the matrix
+  p.values <- p.mat[upper.tri(p.mat)]
+  # Adjust p-values for FDR
+  p.adjusted <- p.adjust(p.values, method = "fdr")
+  # Fill in adjusted p-values back into the matrix
+  p.mat[upper.tri(p.mat)] <- p.adjusted
+  p.mat[lower.tri(p.mat)] <- t(p.mat)[lower.tri(t(p.mat))] # Reflect across diagonal
+  colnames(p.mat) <- rownames(p.mat) <- colnames(mat)
+  p.mat
+}
+
+# matrix of the p-value of the correlation
+p_mat <- lapply(sp.c.list, function(x) cor.mtest(x))
+
+
+
+# # write an excel with each element of a list as a diff sheet
+write.xlsx(p_mat, file = "240805_SpC.pvals.Final.SC.xlsx",
+           sheetName = names(p_mat), rowNames = TRUE)
+
+write.xlsx(corr_mat, file = "240805_SpC.rho.Final.SC.xlsx",
+           sheetName = names(corr_mat), rowNames = TRUE)
+```
+
+
+```{r}
+# just 1 at a time, not the whole list: names(corr_mat) to see which subgroup to filter for
+## change corr_mat[i] and p_mat[i] for the subgroups - there are 4 lines to change, each noted
+pdf(file = paste("240805_Spearman Corr.",
+                 
+### **Change for syms 1:4** ###
+names(corr_mat[1]),
+                 
+        ".pdf", sep=""),
+        height = 20, width = 20)
+
+### **Change for syms 1:4** ###
+corrplot(corr_mat[[1]],
+         
+         method="color", col=col(200), 
+         type="upper",
+         addCoef.col = "black", # Add coefficient of correlation
+         tl.col="black", tl.srt=45, #Text label color and rotation
+         number.cex = 1.6, tl.cex = 1.8, cl.cex = 1.4,
+         # change size of coef nums in boxes, text label, and color bar text on rt
+         
+         # Combine with significance: only show correlation if p-val is signif
+         
+### **Change for syms 1:4** ###
+p.mat = p_mat[[1]],
+
+         sig.level = 0.05, insig = "blank",
+         title = paste("PFT vs SGRQ for", 
+                       
+### **Change for syms 1:4** ###
+names(corr_mat[1])),
+
+         mar=c(0,0,18,0),
+         cex.main = 4, # make title bigger
+         # hide correlation coefficient on the principal diagonal
+         diag=FALSE 
+)
+dev.off()
+
+```
+
+
+
+### Supplemental Table 1
+#### Comparison of SGRQ Trajectory by Gender
+
+```{r}
+# Q3-SGRQ: Determine if each cluster's slope is significantly different when for each SGRQ Component, 
+# comparing the slope for the  Cluster in Females vs Males.
+#--------------------------
+##################################################################################################################
+##################################################################################################################
+# 1. sgrq_total_score
+# Cluster 1: Respiratory, Cluster 2: Neurologic, Cluster 3: Indiscriminate, Cluster 4: No Symptoms
+#--------------------------
+#--------------------------
+# Cluster 1
+# Linear Mixed Effect Model: Non Hospitalized as a reference group
+summary(lmer(sgrq_total_score ~ ID.m * Sex_fac + (1 | Study_ID), data = subset(sgrq.PFT.cor.total,sym.clus==1)))
+# anova(lmer(sgrq_total_score ~ ID.m * Sex_fac + (1 | Study_ID), data = subset(sgrq.PFT.cor.total,sym.clus==1)))
+#--------------------------
+#--------------------------
+# Cluster 2
+# Linear Mixed Effect Model: Non Hospitalized as a reference group
+summary(lmer(sgrq_total_score ~ ID.m * Sex_fac + (1 | Study_ID), data = subset(sgrq.PFT.cor.total,sym.clus==2)))
+# anova(lmer(sgrq_total_score ~ ID.m * Sex_fac + (1 | Study_ID), data = subset(sgrq.PFT.cor.total,sym.clus==2)))
+#--------------------------
+#--------------------------
+# Cluster 3
+# Linear Mixed Effect Model: Non Hospitalized as a reference group
+summary(lmer(sgrq_total_score ~ ID.m * Sex_fac + (1 | Study_ID), data = subset(sgrq.PFT.cor.total,sym.clus==3)))
+# anova(lmer(sgrq_total_score ~ ID.m * Sex_fac + (1 | Study_ID), data = subset(sgrq.PFT.cor.total,sym.clus==3)))
+#--------------------------
+#--------------------------
+# Cluster 4
+# Linear Mixed Effect Model: Non Hospitalized as a reference group
+summary(lmer(sgrq_total_score ~ ID.m * Sex_fac + (1 | Study_ID), data = subset(sgrq.PFT.cor.total,sym.clus==4)))
+# anova(lmer(sgrq_total_score ~ ID.m * Sex_fac + (1 | Study_ID), data = subset(sgrq.PFT.cor.total,sym.clus==4)))
+#--------------------------
+##################################################################################################################
+#--------------------------
+# 2. sgrq_symptoms_score
+# Cluster 1: Respiratory, Cluster 2: Neurologic, Cluster 3: Indiscriminate, Cluster 4: No Symptoms
+#--------------------------
+#--------------------------
+# Cluster 1
+# Linear Mixed Effect Model: Non Hospitalized as a reference group
+summary(lmer(sgrq_symptoms_score ~ ID.m * Sex_fac + (1 | Study_ID), data = subset(sgrq.PFT.cor.symptoms,sym.clus==1)))
+# anova(lmer(sgrq_symptoms_score ~ ID.m * Sex_fac + (1 | Study_ID), data = subset(sgrq.PFT.cor.symptoms,sym.clus==1)))
+#--------------------------
+#--------------------------
+# Cluster 2
+# Linear Mixed Effect Model: Non Hospitalized as a reference group
+summary(lmer(sgrq_symptoms_score ~ ID.m * Sex_fac + (1 | Study_ID), data = subset(sgrq.PFT.cor.symptoms,sym.clus==2)))
+# anova(lmer(sgrq_symptoms_score ~ ID.m * Sex_fac + (1 | Study_ID), data = subset(sgrq.PFT.cor.symptoms,sym.clus==2)))
+#--------------------------
+#--------------------------
+# Cluster 3
+# Linear Mixed Effect Model: Non Hospitalized as a reference group
+summary(lmer(sgrq_symptoms_score ~ ID.m * Sex_fac + (1 | Study_ID), data = subset(sgrq.PFT.cor.symptoms,sym.clus==3)))
+# anova(lmer(sgrq_symptoms_score ~ ID.m * Sex_fac + (1 | Study_ID), data = subset(sgrq.PFT.cor.symptoms,sym.clus==3)))
+#--------------------------
+#--------------------------
+# Cluster 4
+# Linear Mixed Effect Model: Non Hospitalized as a reference group
+summary(lmer(sgrq_symptoms_score ~ ID.m * Sex_fac + (1 | Study_ID), data = subset(sgrq.PFT.cor.symptoms,sym.clus==4)))
+# anova(lmer(sgrq_symptoms_score ~ ID.m * Sex_fac + (1 | Study_ID), data = subset(sgrq.PFT.cor.symptoms,sym.clus==4)))
+#--------------------------
+##################################################################################################################
+#--------------------------
+# 3. sgrq_activity_score
+# Cluster 1: Respiratory, Cluster 2: Neurologic, Cluster 3: Indiscriminate, Cluster 4: No Symptoms
+#--------------------------
+#--------------------------
+# Cluster 1
+# Linear Mixed Effect Model: Non Hospitalized as a reference group
+summary(lmer(sgrq_activity_score ~ ID.m * Sex_fac + (1 | Study_ID), data = subset(sgrq.PFT.cor.activity,sym.clus==1)))
+# anova(lmer(sgrq_activity_score ~ ID.m * Sex_fac + (1 | Study_ID), data = subset(sgrq.PFT.cor.activity,sym.clus==1)))
+#--------------------------
+#--------------------------
+# Cluster 2
+# Linear Mixed Effect Model: Non Hospitalized as a reference group
+summary(lmer(sgrq_activity_score ~ ID.m * Sex_fac + (1 | Study_ID), data = subset(sgrq.PFT.cor.activity,sym.clus==2)))
+# anova(lmer(sgrq_activity_score ~ ID.m * Sex_fac + (1 | Study_ID), data = subset(sgrq.PFT.cor.activity,sym.clus==2)))
+#--------------------------
+#--------------------------
+# Cluster 3
+# Linear Mixed Effect Model: Non Hospitalized as a reference group
+summary(lmer(sgrq_activity_score ~ ID.m * Sex_fac + (1 | Study_ID), data = subset(sgrq.PFT.cor.activity,sym.clus==3)))
+# anova(lmer(sgrq_activity_score ~ ID.m * Sex_fac + (1 | Study_ID), data = subset(sgrq.PFT.cor.activity,sym.clus==3)))
+#--------------------------
+#--------------------------
+# Cluster 4
+# Linear Mixed Effect Model: Non Hospitalized as a reference group
+summary(lmer(sgrq_activity_score ~ ID.m * Sex_fac + (1 | Study_ID), data = subset(sgrq.PFT.cor.activity,sym.clus==4)))
+# anova(lmer(sgrq_activity_score ~ ID.m * Sex_fac + (1 | Study_ID), data = subset(sgrq.PFT.cor.activity,sym.clus==4)))
+#--------------------------
+##################################################################################################################
+#--------------------------
+# 4. sgrq_impact_score
+# Cluster 1: Respiratory, Cluster 2: Neurologic, Cluster 3: Indiscriminate, Cluster 4: No Symptoms
+#--------------------------
+#--------------------------
+# Cluster 1
+# Linear Mixed Effect Model: Non Hospitalized as a reference group
+summary(lmer(sgrq_impact_score ~ ID.m * Sex_fac + (1 | Study_ID), data = subset(sgrq.PFT.cor.impact,sym.clus==1)))
+# anova(lmer(sgrq_impact_score ~ ID.m * Sex_fac + (1 | Study_ID), data = subset(sgrq.PFT.cor.impact,sym.clus==1)))
+#--------------------------
+#--------------------------
+# Cluster 2
+# Linear Mixed Effect Model: Non Hospitalized as a reference group
+summary(lmer(sgrq_impact_score ~ ID.m * Sex_fac + (1 | Study_ID), data = subset(sgrq.PFT.cor.impact,sym.clus==2)))
+# anova(lmer(sgrq_impact_score ~ ID.m * Sex_fac + (1 | Study_ID), data = subset(sgrq.PFT.cor.impact,sym.clus==2)))
+#--------------------------
+#--------------------------
+# Cluster 3
+# Linear Mixed Effect Model: Non Hospitalized as a reference group
+summary(lmer(sgrq_impact_score ~ ID.m * Sex_fac + (1 | Study_ID), data = subset(sgrq.PFT.cor.impact,sym.clus==3)))
+# anova(lmer(sgrq_impact_score ~ ID.m * Sex_fac + (1 | Study_ID), data = subset(sgrq.PFT.cor.impact,sym.clus==3)))
+#--------------------------
+#--------------------------
+# Cluster 4
+# Linear Mixed Effect Model: Non Hospitalized as a reference group
+summary(lmer(sgrq_impact_score ~ ID.m * Sex_fac + (1 | Study_ID), data = subset(sgrq.PFT.cor.impact,sym.clus==4)))
+# anova(lmer(sgrq_impact_score ~ ID.m * Sex_fac + (1 | Study_ID), data = subset(sgrq.PFT.cor.impact,sym.clus==4)))
+
+```
+
+
+
+### Supplemental Table 2
+#### Incidence of PFT Abnormality by Symptom cluster
+
+```{r}
+master.chi2 <- master
+
+master.chi2$pft.clus <- master.file$pft.clus[match(master.chi2$ID.TP, master.file$ID.TP)]
+
+clus.id2 <- read.csv("Sym 3-18 Clusters.csv", header = T, check.names=F)
+master.chi2$sym.clus <- clus.id2$sym.clus[match(master.chi2$ID.TP, clus.id2$all5.IDs)]
+
+master.chi2 <- master.chi2[!is.na(master.chi2$sym.clus),]
+master.chi2 <- master.chi2[!is.na(master.chi2$pft.clus),]
+
+
+# Function for "Count Type" # (#%)
+count_type <- function(data,total) {
+  cnt <- data %>% summarise(count = n())
+  cnt <- cnt$count
+  paste0(cnt," (", (round(cnt/total * 100,1)),"%)")
+}
+
+```
+
+
+```{r}
+# Table
+
+getTable1 <- function(filename) {
+  dat <- master.chi2
+
+  dat <- dat %>% mutate(sym.clus=case_when(
+    sym.clus == 1 ~ 'Respiratory',
+    sym.clus == 2 ~ 'Neurologic',
+    sym.clus == 3 ~ 'Indiscriminate Symptoms',
+    sym.clus == 4 ~ 'No Symptoms',
+    TRUE ~ 'NA'
+  ))
+
+  
+  # dat$PFT
+  p1 <- dat %>% filter(pft.clus==1)
+  p2 <- dat %>% filter(pft.clus==2)
+  
+  total <- dat%>%summarize(count=n())
+  
+  total <- list()
+  for(i in unique(dat$sym.clus)){
+    total[[i]] <- dat %>% filter(sym.clus == i) %>% summarize(count=n())
+  }
+  
+
+  
+  # For each TP
+  dat.3 <- dat[dat$TP == "T3",]
+  p1.3 <- dat.3 %>% filter(pft.clus==1)
+  p2.3 <- dat.3 %>% filter(pft.clus==2)
+  total.3 <- list()
+  for(i in unique(dat.3$sym.clus)){
+    total.3[[i]] <- dat.3 %>% filter(sym.clus == i) %>% summarize(count=n())
+  }
+
+  
+  dat.6 <- dat[dat$TP == "T6",]
+  p1.6 <- dat.6 %>% filter(pft.clus==1)
+  p2.6 <- dat.6 %>% filter(pft.clus==2)
+  total.6 <- list()
+  for(i in unique(dat.6$sym.clus)){
+    total.6[[i]] <- dat.6 %>% filter(sym.clus == i) %>% summarize(count=n())
+  }
+  
+  
+  dat.12 <- dat[dat$TP == "T12",]
+  p1.12 <- dat.12 %>% filter(pft.clus==1)
+  p2.12 <- dat.12 %>% filter(pft.clus==2)
+  total.12 <- list()
+  for(i in unique(dat.12$sym.clus)){
+    total.12[[i]] <- dat.12 %>% filter(sym.clus == i) %>% summarize(count=n())
+  }
+  
+  
+  dat.18 <- dat[dat$TP == "T18",]
+  p1.18 <- dat.18 %>% filter(pft.clus==1)
+  p2.18 <- dat.18 %>% filter(pft.clus==2)
+  total.18 <- list()
+  for(i in unique(dat.18$sym.clus)){
+    total.18[[i]] <- dat.18 %>% filter(sym.clus == i) %>% summarize(count=n())
+  }
+  
+  
+  cat(paste0(",Abnormal,Normal"),"\n")
+
+  
+
+  for(i in unique(dat$sym.clus)){
+    # dat.t <- split(dat, dat$sym.clus) # create a dataframe based on each filter
+    cat(paste0(i,",,,,\n",
+               "All Encounters,",
+               count_type(p1 %>% filter(sym.clus==i), total[[i]]),",",
+               count_type(p2 %>% filter(sym.clus==i), total[[i]]),"\n",
+               "T3,", count_type(p1.3 %>% filter(sym.clus==i), total.3[[i]]),",",
+               count_type(p2.3 %>% filter(sym.clus==i), total.3[[i]]),"\n",
+               "T6,", count_type(p1.6 %>% filter(sym.clus==i), total.6[[i]]),",",
+               count_type(p2.6 %>% filter(sym.clus==i), total.6[[i]]),"\n",
+               "T12,", count_type(p1.12 %>% filter(sym.clus==i), total.12[[i]]),",",
+               count_type(p2.12 %>% filter(sym.clus==i), total.12[[i]]),"\n",
+               "T18,", count_type(p1.18 %>% filter(sym.clus==i), total.18[[i]]),",",
+               count_type(p2.18 %>% filter(sym.clus==i), total.18[[i]]),"\n"
+               ))
+  }
+  
+}
+
+# ---------
+# Print all, copy into text editor, then open as excel so commas convert to columns
+getTable1(filename)
+
+```
